@@ -507,15 +507,6 @@ useFormStorage('user-form', form, {
 - The library uses React's built-in optimization (useCallback, useMemo)
 - Storage operations are performed asynchronously when possible
 
-## Error Handling
-
-The library handles common storage errors gracefully:
-
-- Storage quota exceeded
-- Storage disabled/unavailable
-- JSON parsing errors
-- SSR environments
-
 ```typescript
 useFormStorage('my-form', form, {
   onSave: (data) => {
@@ -539,4 +530,4 @@ MIT License.
 
 ---
 
-For more examples and advanced usage patterns, please visit our [GitHub repository](https://github.com/franco/react-hook-form-storage).
+For more examples and advanced usage patterns, please visit our [GitHub repository](https://github.com/francogabriel92/react-hook-form-storage).
