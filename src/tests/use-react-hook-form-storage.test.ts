@@ -1,7 +1,7 @@
 import { beforeEach, describe, it, expect, jest } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useForm } from 'react-hook-form';
-import { UseFormStorageOptions } from '../types';
+import { UseFormStorageAdapter, UseFormStorageOptions } from '../types';
 import { useFormStorage } from '../use-react-hook-form-storage';
 import { createMockRemoteStore } from './test-utils';
 
@@ -397,7 +397,6 @@ describe('useFormStorage', () => {
   it('Should work with custom async storage', async () => {
     const mockStorage = createMockRemoteStore({
       delayMs: 50,
-      shouldFail: false,
     });
 
     // Pre-populate mock storage with test data
@@ -443,6 +442,73 @@ describe('useFormStorage', () => {
     await waitFor(async () => {
       const storedValue = await mockStorage.getItem(STORAGE_TEST_KEY);
       expect(storedValue).toBeNull();
+    });
+  });
+
+  it('Should handle errors when restored malformatted storage', async () => {
+    // Mock console.error to suppress error logs in test output
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    // Setup localStorage with malformatted data
+    localStorage.setItem(STORAGE_TEST_KEY, 'malformatted data');
+
+    const { formStorage } = await renderFormHook();
+
+    // Assert that isRestored is false due to error
+    expect(formStorage.isRestored).toBe(false);
+
+    // Assert that the error is logged
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to restore data from storage')
+    );
+  });
+
+  it('Should handle errors when saving to storage', async () => {
+    // Mock console.error to suppress error logs in test output
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    // Create a faulty storage that throws an error on setItem
+    const mockStorage = createMockRemoteStore({
+      delayMs: 0,
+      shouldFailSave: true,
+    });
+
+    const { setValue } = await renderFormHook({
+      storage: mockStorage,
+    });
+
+    act(() => {
+      setValue('name', TEST_NAME);
+    });
+
+    // Assert that the error is logged
+    await waitFor(() => {
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to save data to storage')
+      );
+    });
+  });
+
+  it('Should handle errors when clearing storage', async () => {
+    // Mock console.error to suppress error logs in test output
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    // Create a faulty storage that throws an error on removeItem
+    const mockStorage = createMockRemoteStore({
+      delayMs: 0,
+      shouldFailClear: true,
+    });
+
+    const { formStorage } = await renderFormHook({
+      storage: mockStorage,
+    });
+
+    act(() => {
+      formStorage.clear();
+    });
+
+    // Assert that the error is logged
+    await waitFor(() => {
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to clear storage')
+      );
     });
   });
 });

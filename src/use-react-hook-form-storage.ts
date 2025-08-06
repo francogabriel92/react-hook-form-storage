@@ -68,42 +68,54 @@ export const useFormStorage = <T extends FieldValues>(
   const { setValue, watch } = form;
 
   const setStorageValue = useCallback(
-    (key: string, value: string) => storage.setItem(key, value),
+    async (key: string, value: string) => await storage.setItem(key, value),
     [storage]
   );
 
   const getStorageValue = useCallback(
-    (key: string) => {
-      const value = storage.getItem(key);
+    async (key: string) => {
+      const value = await storage.getItem(key);
       return value;
     },
     [storage]
   );
 
   const clearStorage = useCallback(
-    (key: string) => storage.removeItem(key),
+    async (key: string) => {
+      try {
+        await storage.removeItem(key);
+      } catch (error) {
+        console.error(`[FORM-STORAGE] Failed to clear storage: ${error}`);
+      }
+    },
     [storage]
   );
 
   const saveToStorage = useCallback(
     async (values: Record<string, any>) => {
-      // Filter out fields from the values to store
-      const valuesToStore = filterIncludedOrExcludedFields(
-        values,
-        included,
-        excluded
-      );
+      try {
+        // Filter out fields from the values to store
+        const valuesToStore = filterIncludedOrExcludedFields(
+          values,
+          included,
+          excluded
+        );
 
-      // Apply serialization if serializers are provided
-      const serializedValues = transformValues(
-        valuesToStore,
-        // TODO: Fix type casting here
-        serializer as any
-      );
+        // Apply serialization if serializers are provided
+        const serializedValues = transformValues(
+          valuesToStore,
+          // TODO: Fix type casting here
+          serializer as any
+        );
 
-      await setStorageValue(key, JSON.stringify(serializedValues));
-      // Call onUpdate callback if provided
-      onSave?.(valuesToStore);
+        await setStorageValue(key, JSON.stringify(serializedValues));
+        // Call onUpdate callback if provided
+        onSave?.(valuesToStore);
+      } catch (error) {
+        console.error(
+          `[FORM-STORAGE] Failed to save data to storage: ${error}`
+        );
+      }
     },
     [key, included, excluded, onSave, serializer, setStorageValue]
   );
@@ -142,7 +154,9 @@ export const useFormStorage = <T extends FieldValues>(
           onRestore?.(valuesToRestore);
         }
       } catch (error) {
-        console.error('Failed to restore data from storage:', error);
+        console.error(
+          `[FORM-STORAGE] Failed to restore data from storage: ${error}`
+        );
       }
     };
     restoreDataFromStorage();
