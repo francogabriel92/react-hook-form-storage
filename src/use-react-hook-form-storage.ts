@@ -1,5 +1,5 @@
 import type { FieldValues, Path, UseFormReturn } from 'react-hook-form';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   debouncer,
   filterIncludedOrExcludedFields,
@@ -67,29 +67,38 @@ export const useFormStorage = <T extends FieldValues>(
 
   const { setValue, watch } = form;
 
-  const setStorageValue = useCallback(
-    async (key: string, value: string) => await storage.setItem(key, value),
-    [storage]
-  );
-
-  const getStorageValue = useCallback(
-    async (key: string) => {
-      const value = await storage.getItem(key);
-      return value;
-    },
-    [storage]
-  );
-
-  const clearStorage = useCallback(
-    async (key: string) => {
+  const storageAdapter = useMemo(() => {
+    const setItem = async (key: string, value: string) => {
       try {
-        await storage.removeItem(key);
+        return await storage.setItem(key, value);
+      } catch (error) {
+        console.error(
+          `[FORM-STORAGE] Failed to save data to storage: ${error}`
+        );
+      }
+    };
+
+    const getItem = async (key: string) => {
+      try {
+        return await storage.getItem(key);
+      } catch (error) {
+        console.error(
+          `[FORM-STORAGE] Failed to restore data from storage: ${error}`
+        );
+        return null;
+      }
+    };
+
+    const removeItem = async (key: string) => {
+      try {
+        return await storage.removeItem(key);
       } catch (error) {
         console.error(`[FORM-STORAGE] Failed to clear storage: ${error}`);
       }
-    },
-    [storage]
-  );
+    };
+
+    return { setItem, getItem, removeItem };
+  }, [storage]);
 
   const saveToStorage = useCallback(
     async (values: Record<string, any>) => {
@@ -108,7 +117,7 @@ export const useFormStorage = <T extends FieldValues>(
           serializer as any
         );
 
-        await setStorageValue(key, JSON.stringify(serializedValues));
+        await storageAdapter.setItem(key, JSON.stringify(serializedValues));
         // Call onUpdate callback if provided
         onSave?.(valuesToStore);
       } catch (error) {
@@ -117,14 +126,14 @@ export const useFormStorage = <T extends FieldValues>(
         );
       }
     },
-    [key, included, excluded, onSave, serializer, setStorageValue]
+    [key, included, excluded, onSave, serializer, storageAdapter]
   );
 
   // Load initial values from storage if available
   useEffect(() => {
     const restoreDataFromStorage = async () => {
       try {
-        const storedValue = await getStorageValue(key);
+        const storedValue = await storageAdapter.getItem(key);
         if (storedValue) {
           const parsedValue = JSON.parse(storedValue) as FieldValues;
 
@@ -178,6 +187,6 @@ export const useFormStorage = <T extends FieldValues>(
   return {
     isRestored,
     save: async () => saveToStorage(form.getValues()),
-    clear: async () => clearStorage(key),
+    clear: async () => storageAdapter.removeItem(key),
   };
 };
