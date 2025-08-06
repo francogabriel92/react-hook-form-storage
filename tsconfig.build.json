@@ -4,8 +4,7 @@
     "noEmit": false,
     "declaration": true,
     "outDir": "dist",
-    "rootDir": "src",
-    "removeComments": true
+    "rootDir": "src"
   },
   "exclude": [
     "node_modules",
