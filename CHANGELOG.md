@@ -15,3 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Debouncing
 - Field inclusion/exclusion
 - Custom serializers
+
+## [1.1.0]
+
+### Added
+
+- `autoRestore` option to enable or disable automatic restoration of form data from storage.
+- Documentation updates for the `autoRestore` parameter in the README.
+
+### Improved
+
+- Minor performance optimizations for storage operations.
+- Enhanced error handling for storage adapter methods.

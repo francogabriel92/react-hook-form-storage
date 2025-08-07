@@ -2,6 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/react-hook-form-storage.svg)](https://www.npmjs.com/package/react-hook-form-storage)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/react-hook-form-storage.svg)](https://bundlephobia.com/package/react-hook-form-storage)
+![Tests](https://github.com/francogabriel92/react-hook-form-storage/actions/workflows/test.yml/badge.svg)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -121,6 +122,7 @@ interface UseFormStorageOptions<T extends FieldValues> {
   validate?: boolean; // Validate fields when restored
   serializer?: Record<Path<T>, Serializer<T, Path<T>>>; // Custom serializers
   autoSave?: boolean; // Enable/disable automatic saving
+  autoRestore?: boolean; // Enable/disable automatic restoration
 }
 ```
 
@@ -257,6 +259,23 @@ const { save } = useFormStorage('my-form', form, {
 // Manually save when needed
 const handleSave = () => {
   save();
+};
+```
+
+#### `autoRestore`
+
+- **Type**: `boolean`
+- **Default**: `true`
+- **Description**: Enable or disable automatic restoration of form data from storage. When disabled, you can manually restore data using the `restore` function returned by the hook.
+
+```typescript
+const { restore } = useFormStorage('my-form', form, {
+  autoRestore: false, // Disable automatic restoration
+});
+
+// Manually restore data when needed
+const handleRestore = () => {
+  restore();
 };
 ```
 
