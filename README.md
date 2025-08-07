@@ -121,6 +121,7 @@ interface UseFormStorageOptions<T extends FieldValues> {
   validate?: boolean; // Validate fields when restored
   serializer?: Record<Path<T>, Serializer<T, Path<T>>>; // Custom serializers
   autoSave?: boolean; // Enable/disable automatic saving
+  autoRestore?: boolean; // Enable/disable automatic restoration
 }
 ```
 
@@ -257,6 +258,23 @@ const { save } = useFormStorage('my-form', form, {
 // Manually save when needed
 const handleSave = () => {
   save();
+};
+```
+
+#### `autoRestore`
+
+- **Type**: `boolean`
+- **Default**: `true`
+- **Description**: Enable or disable automatic restoration of form data from storage. When disabled, you can manually restore data using the `restore` function returned by the hook.
+
+```typescript
+const { restore } = useFormStorage('my-form', form, {
+  autoRestore: false, // Disable automatic restoration
+});
+
+// Manually restore data when needed
+const handleRestore = () => {
+  restore();
 };
 ```
 
