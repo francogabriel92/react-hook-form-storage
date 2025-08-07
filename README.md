@@ -2,6 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/react-hook-form-storage.svg)](https://www.npmjs.com/package/react-hook-form-storage)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/react-hook-form-storage.svg)](https://bundlephobia.com/package/react-hook-form-storage)
+![Tests](https://github.com/francogabriel92/react-hook-form-storage/actions/workflows/test.yml/badge.svg)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
