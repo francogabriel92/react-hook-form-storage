@@ -23,6 +23,7 @@ type UseFormStorageBaseOptions<T extends FieldValues> = {
     [P in Path<T>]?: Serializer<T, P>;
   };
   autoSave?: boolean;
+  autoRestore?: boolean;
 };
 
 type IncludedOptions<T extends FieldValues, K extends Path<T>[]> = {

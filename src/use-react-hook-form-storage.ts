@@ -26,6 +26,7 @@ import { UseFormStorageOptions } from './types';
  * @param {boolean} [options.validate] - Whether to validate fields when restoring
  * @param {Record<string, any>} [options.serializer] - Custom serialization functions for specific fields
  * @param {boolean} [options.autoSave=true] - Whether to automatically save changes
+ * @param {boolean} [options.autoRestore=true] - Whether to automatically restore values
  *
  * @returns {Object} Hook return object
  * @returns {boolean} returns.isRestored - Whether data has been restored from storage
@@ -61,6 +62,7 @@ export const useFormStorage = <T extends FieldValues>(
     validate,
     serializer = {},
     autoSave = true,
+    autoRestore = true,
   }: UseFormStorageOptions<T> = {}
 ) => {
   const [isRestored, setIsRestored] = useState(false);
@@ -100,75 +102,64 @@ export const useFormStorage = <T extends FieldValues>(
     return { setItem, getItem, removeItem };
   }, [storage]);
 
+  // Save form values to storage
   const saveToStorage = useCallback(
     async (values: Record<string, any>) => {
       try {
-        // Filter out fields from the values to store
         const valuesToStore = filterIncludedOrExcludedFields(
           values,
           included,
           excluded
         );
-
-        // Apply serialization if serializers are provided
-        const serializedValues = transformValues(
-          valuesToStore,
-          // TODO: Fix type casting here
-          serializer as any
-        );
-
-        await storageAdapter.setItem(key, JSON.stringify(serializedValues));
-        // Call onUpdate callback if provided
+        const serialized = transformValues(valuesToStore, serializer as any);
+        await storageAdapter.setItem(key, JSON.stringify(serialized));
         onSave?.(valuesToStore);
       } catch (error) {
-        console.error(
-          `[FORM-STORAGE] Failed to save data to storage: ${error}`
-        );
+        console.error(`[FORM-STORAGE] Failed to save data: ${error}`);
       }
     },
-    [key, included, excluded, onSave, serializer, storageAdapter]
+    [key, included, excluded, serializer, storageAdapter, onSave]
   );
 
-  // Load initial values from storage if available
-  useEffect(() => {
-    const restoreDataFromStorage = async () => {
-      try {
-        const storedValue = await storageAdapter.getItem(key);
-        if (storedValue) {
-          const parsedValue = JSON.parse(storedValue) as FieldValues;
+  // Restore initial values from storage if available
+  const restoreDataFromStorage = useCallback(async () => {
+    try {
+      const storedValue = await storageAdapter.getItem(key);
+      if (storedValue) {
+        const parsedValue = JSON.parse(storedValue) as FieldValues;
 
-          const valuesToRestore = filterIncludedOrExcludedFields(
-            parsedValue,
-            included,
-            excluded
-          );
-
-          const deserializedValues = transformValues(
-            valuesToRestore,
-            // TODO: Fix type casting here
-            serializer as any,
-            true
-          );
-
-          // Set the values in the form
-          Object.entries(deserializedValues).forEach(([field, value]) => {
-            setValue(field as Path<T>, value, {
-              shouldDirty: dirty,
-              shouldTouch: touched,
-              shouldValidate: validate,
-            });
-          });
-          setIsRestored(true);
-          // Call onDataRestore callback if provided
-          onRestore?.(valuesToRestore);
-        }
-      } catch (error) {
-        console.error(
-          `[FORM-STORAGE] Failed to restore data from storage: ${error}`
+        const valuesToRestore = filterIncludedOrExcludedFields(
+          parsedValue,
+          included,
+          excluded
         );
+
+        const deserializedValues = transformValues(
+          valuesToRestore,
+          // TODO: Fix type casting here
+          serializer as any,
+          true
+        );
+
+        Object.entries(deserializedValues).forEach(([field, value]) => {
+          setValue(field as Path<T>, value, {
+            shouldDirty: dirty,
+            shouldTouch: touched,
+            shouldValidate: validate,
+          });
+        });
+        setIsRestored(true);
+        onRestore?.(valuesToRestore);
       }
-    };
-    restoreDataFromStorage();
+    } catch (error) {
+      console.error(
+        `[FORM-STORAGE] Failed to restore data from storage: ${error}`
+      );
+    }
+  }, [included, excluded, serializer, setValue]);
+
+  useEffect(() => {
+    if (autoRestore) restoreDataFromStorage();
   }, []);
 
   // Watch for changes in form values and update storage
@@ -188,5 +179,6 @@ export const useFormStorage = <T extends FieldValues>(
     isRestored,
     save: async () => saveToStorage(form.getValues()),
     clear: async () => storageAdapter.removeItem(key),
+    restore: async () => restoreDataFromStorage(),
   };
 };

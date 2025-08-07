@@ -511,4 +511,30 @@ describe('useFormStorage', () => {
       );
     });
   });
+
+  it('Should handle non autoRestore scenarios', async () => {
+    localStorage.setItem(
+      STORAGE_TEST_KEY,
+      JSON.stringify(STORAGE_DEFAULT_VALUES)
+    );
+
+    const { getValues, formStorage } = await renderFormHook({
+      autoRestore: false,
+    });
+
+    // Assert that form was not initialized with localStorage values
+    expect(getValues('name')).toBe('');
+    expect(getValues('email')).toBe('');
+
+    // Restore values manually
+    act(async () => {
+      await formStorage.restore();
+    });
+
+    // Assert that form was restored with localStorage values
+    await waitFor(() => {
+      expect(getValues('name')).toBe(STORAGE_DEFAULT_VALUES.name);
+      expect(getValues('email')).toBe(STORAGE_DEFAULT_VALUES.email);
+    });
+  });
 });
