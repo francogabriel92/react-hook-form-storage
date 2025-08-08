@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: 'npm'
+    directory: '/'
+    commit-message:
+      prefix: 'chore'
+    labels:
+      - '📦 dependencies'
+    schedule:
+      interval: 'monthly'
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    commit-message:
+      prefix: 'ci'
+    schedule:
+      interval: 'monthly'
+    labels:
+      - '📦 dependencies'
+      - '🤖 ci/cd'
