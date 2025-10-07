@@ -64,6 +64,52 @@ beforeEach(() => {
 });
 
 describe('useFormStorage', () => {
+  it('Should have isLoading false after autoRestore with data', async () => {
+    localStorage.setItem(
+      STORAGE_TEST_KEY,
+      JSON.stringify(STORAGE_DEFAULT_VALUES)
+    );
+
+    const { formStorage } = await renderFormHook();
+
+    expect(formStorage.isLoading).toBe(false);
+    expect(formStorage.isRestored).toBe(true);
+  });
+
+  it('Should have isLoading false after autoRestore with empty storage', async () => {
+    const { formStorage } = await renderFormHook();
+
+    expect(formStorage.isLoading).toBe(false);
+    expect(formStorage.isRestored).toBe(false);
+  });
+
+  it('Should have isLoading false when autoRestore is disabled', async () => {
+    const { formStorage } = await renderFormHook({
+      autoRestore: false,
+    });
+
+    expect(formStorage.isLoading).toBe(false);
+    expect(formStorage.isRestored).toBe(false);
+  });
+
+  it('Should have isLoading property available', async () => {
+    const { formStorage } = await renderFormHook();
+
+    // isLoading should be a boolean
+    expect(typeof formStorage.isLoading).toBe('boolean');
+  });
+
+  it('Should have isLoading false after restore error', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    localStorage.setItem(STORAGE_TEST_KEY, 'malformatted data');
+
+    const { formStorage } = await renderFormHook();
+
+    expect(formStorage.isLoading).toBe(false);
+    expect(formStorage.isRestored).toBe(false);
+  });
+
   it('Should initialize form values from localStorage', async () => {
     // Setup localStorage with test data
     localStorage.setItem(
