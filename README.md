@@ -64,13 +64,17 @@ function MyForm() {
     },
   });
 
-  const { isRestored } = useFormStorage('my-form', form, {
+  const { isRestored, isLoading } = useFormStorage('my-form', form, {
     // Options go here
   });
 
   const onSubmit = (data: FormData) => {
     console.log(data);
   };
+
+  if (isLoading) {
+    return <div>Loading saved data...</div>;
+  }
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)}>
@@ -101,6 +105,7 @@ The main hook that provides storage functionality for your React Hook Form.
 ```typescript
 {
   isRestored: boolean;  // Indicates if data was restored from storage
+  isLoading: boolean;   // Indicates if restoration is in progress
   save: () => void;     // Manual save function
 }
 ```
