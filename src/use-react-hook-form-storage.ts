@@ -30,6 +30,7 @@ import { UseFormStorageOptions } from './types';
  *
  * @returns {Object} Hook return object
  * @returns {boolean} returns.isRestored - Whether data has been restored from storage
+ * @returns {boolean} returns.isLoading - Whether restoration is in progress
  * @returns {() => Promise<void>} returns.save - Manual save function to store current form values
  * @returns {() => Promise<void>} returns.clear - Function to clear stored data
  *
@@ -66,6 +67,7 @@ export const useFormStorage = <T extends FieldValues>(
   }: UseFormStorageOptions<T> = {}
 ) => {
   const [isRestored, setIsRestored] = useState(false);
+  const [isLoading, setIsLoading] = useState(autoRestore);
 
   const { setValue, watch } = form;
 
@@ -123,6 +125,7 @@ export const useFormStorage = <T extends FieldValues>(
 
   // Restore initial values from storage if available
   const restoreDataFromStorage = useCallback(async () => {
+    setIsLoading(true);
     try {
       const storedValue = await storageAdapter.getItem(key);
       if (storedValue) {
@@ -155,6 +158,8 @@ export const useFormStorage = <T extends FieldValues>(
       console.error(
         `[FORM-STORAGE] Failed to restore data from storage: ${error}`
       );
+    } finally {
+      setIsLoading(false);
     }
   }, [included, excluded, serializer, setValue]);
 
@@ -177,6 +182,7 @@ export const useFormStorage = <T extends FieldValues>(
 
   return {
     isRestored,
+    isLoading,
     save: async () => saveToStorage(form.getValues()),
     clear: async () => storageAdapter.removeItem(key),
     restore: async () => restoreDataFromStorage(),
