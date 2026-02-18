@@ -165,7 +165,7 @@ export const useFormStorage = <T extends FieldValues>(
 
   useEffect(() => {
     if (autoRestore) restoreDataFromStorage();
-  }, []);
+  }, [autoRestore]);
 
   // Watch for changes in form values and update storage
   useEffect(() => {
@@ -178,7 +178,7 @@ export const useFormStorage = <T extends FieldValues>(
 
     return () => subscription.unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watch, debounce]);
+  }, [watch, debounce, autoSave]);
 
   return {
     isRestored,
