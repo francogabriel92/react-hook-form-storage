@@ -69,7 +69,9 @@ export const transformValues = <T extends FieldValues>(
       ? fieldSerializer.deserialize
       : fieldSerializer.serialize;
 
-    if (!transformFn) return acc;
+    // Both directions are optional, so a serializer may define only one.
+    // Fall back to identity rather than dropping the field entirely.
+    if (!transformFn) return { ...acc, [field]: value };
 
     const transformedValue = transformFn(value);
     return { ...acc, [field]: transformedValue };

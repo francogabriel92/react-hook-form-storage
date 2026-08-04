@@ -383,6 +383,37 @@ describe('useFormStorage', () => {
     expect(getValues('number')).toBe(9);
   });
 
+  it('Should keep the field value when the serializer defines only one direction', async () => {
+    localStorage.setItem(
+      STORAGE_TEST_KEY,
+      JSON.stringify(STORAGE_DEFAULT_VALUES)
+    );
+
+    const { getValues, setValue } = await renderFormHook({
+      serializer: {
+        name: {
+          serialize: (value) => value.toUpperCase(),
+          // no deserialize: restoring must keep the stored value as-is
+        },
+      },
+    });
+
+    // Restoring without a deserialize must not drop the field
+    expect(getValues('name')).toBe(STORAGE_DEFAULT_VALUES.name);
+
+    act(() => {
+      setValue('name', TEST_NAME);
+    });
+
+    // Saving still applies the direction that IS defined
+    await waitFor(() => {
+      const storedValue = JSON.parse(
+        localStorage.getItem(STORAGE_TEST_KEY) as string
+      );
+      expect(storedValue.name).toBe(TEST_NAME.toUpperCase());
+    });
+  });
+
   it('Should not save values if autoSave is false', async () => {
     const { setValue } = await renderFormHook({
       autoSave: false,
