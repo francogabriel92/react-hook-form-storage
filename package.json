@@ -17,7 +17,9 @@
     "test": "jest",
     "test:watch": "jest --watchAll",
     "test:coverage": "jest --coverage",
-    "lint": "eslint src/**/*.{ts,tsx} --fix"
+    "lint": "eslint 'src/**/*.{ts,tsx}' --max-warnings=17",
+    "lint:fix": "eslint 'src/**/*.{ts,tsx}' --fix",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "react",
