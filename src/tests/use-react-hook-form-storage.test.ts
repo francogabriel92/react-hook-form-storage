@@ -143,10 +143,11 @@ describe('useFormStorage', () => {
     });
 
     // Assert that localStorage was updated
-    const storedValue = localStorage.getItem(STORAGE_TEST_KEY);
-    expect(storedValue).toBe(
-      JSON.stringify({ ...FORM_DEFAULT_VALUES, name: TEST_NAME })
-    );
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_TEST_KEY)).toBe(
+        JSON.stringify({ ...FORM_DEFAULT_VALUES, name: TEST_NAME })
+      );
+    });
   });
 
   it('Should not save excluded fields to localStorage', async () => {
@@ -158,9 +159,12 @@ describe('useFormStorage', () => {
       setValue('name', TEST_NAME);
     });
 
-    const storedValue = localStorage.getItem(STORAGE_TEST_KEY);
     const { name: _name, ...valuesWithoutName } = FORM_DEFAULT_VALUES;
-    expect(storedValue).toBe(JSON.stringify(valuesWithoutName));
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_TEST_KEY)).toBe(
+        JSON.stringify(valuesWithoutName)
+      );
+    });
   });
 
   it('Should save only included fields to localStorage', async () => {
@@ -173,8 +177,11 @@ describe('useFormStorage', () => {
       setValue('email', TEST_EMAIL);
     });
 
-    const storedValue = localStorage.getItem(STORAGE_TEST_KEY);
-    expect(storedValue).toBe(JSON.stringify({ name: TEST_NAME }));
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_TEST_KEY)).toBe(
+        JSON.stringify({ name: TEST_NAME })
+      );
+    });
   });
 
   it('Should only loads values from localStorage that are not excluded', async () => {
@@ -276,15 +283,15 @@ describe('useFormStorage', () => {
       setValue('name', TEST_NAME);
     });
 
-    const storedValue = sessionStorage.getItem(STORAGE_TEST_KEY);
-
-    expect(storedValue).toBe(
-      JSON.stringify({
-        ...FORM_DEFAULT_VALUES,
-        ...STORAGE_DEFAULT_VALUES,
-        name: TEST_NAME,
-      })
-    );
+    await waitFor(() => {
+      expect(sessionStorage.getItem(STORAGE_TEST_KEY)).toBe(
+        JSON.stringify({
+          ...FORM_DEFAULT_VALUES,
+          ...STORAGE_DEFAULT_VALUES,
+          name: TEST_NAME,
+        })
+      );
+    });
 
     // Assert that localStorage was not used
     expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
@@ -466,8 +473,8 @@ describe('useFormStorage', () => {
     });
 
     // Call save function
-    act(() => {
-      formStorage.save();
+    await act(async () => {
+      await formStorage.save();
     });
 
     // Assert that localStorage was updated
@@ -496,10 +503,11 @@ describe('useFormStorage', () => {
     });
 
     // Assert that localStorage was updated with serialized array
-    const storedValue = localStorage.getItem(STORAGE_TEST_KEY);
-    expect(storedValue).toBe(
-      JSON.stringify({ ...FORM_DEFAULT_VALUES, list: TEST_LIST.join(',') })
-    );
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_TEST_KEY)).toBe(
+        JSON.stringify({ ...FORM_DEFAULT_VALUES, list: TEST_LIST.join(',') })
+      );
+    });
   });
 
   it('Should work with custom async storage', async () => {
@@ -551,6 +559,35 @@ describe('useFormStorage', () => {
       const storedValue = await mockStorage.getItem(STORAGE_TEST_KEY);
       expect(storedValue).toBeNull();
     });
+  });
+
+  it('Should not let a slow earlier write overwrite a faster later one', async () => {
+    // First write is slow, second is immediate: without ordering the second
+    // lands first and the first then overwrites it with stale values.
+    const mockStorage = createMockRemoteStore({
+      delayMs: 0,
+      saveDelaysMs: [80, 0],
+    });
+
+    const { setValue } = await renderFormHook({ storage: mockStorage });
+
+    act(() => {
+      setValue('name', 'FIRST');
+      setValue('name', 'SECOND');
+    });
+
+    await waitFor(async () => {
+      const storedValue = await mockStorage.getItem(STORAGE_TEST_KEY);
+      expect(JSON.parse(storedValue as string).name).toBe('SECOND');
+    });
+
+    // Let the slow write settle and confirm it did not clobber the newer value
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 150));
+    });
+
+    const finalValue = await mockStorage.getItem(STORAGE_TEST_KEY);
+    expect(JSON.parse(finalValue as string).name).toBe('SECOND');
   });
 
   it('Should handle errors when restored malformatted storage', async () => {

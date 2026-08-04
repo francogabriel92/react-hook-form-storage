@@ -138,22 +138,42 @@ export const useFormStorage = <T extends FieldValues>(
     return { setItem, getItem, removeItem };
   }, [storage]);
 
+  // Writes are chained so they reach an async adapter in the order they were
+  // issued. Without this, a slow write issued first could resolve after a
+  // faster later one and overwrite storage with stale values.
+  const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const latestWriteRef = useRef(0);
+
   // Save form values to storage
   const saveToStorage = useCallback(
     async (values: Record<string, any>) => {
       const { included, excluded, serializer, onSave } = optionsRef.current;
-      try {
-        const valuesToStore = filterIncludedOrExcludedFields(
-          values,
-          included,
-          excluded
-        );
-        const serialized = transformValues(valuesToStore, serializer as any);
-        await storageAdapter.setItem(key, JSON.stringify(serialized));
-        onSave?.(valuesToStore);
-      } catch (error) {
-        console.error(`[FORM-STORAGE] Failed to save data: ${error}`);
-      }
+      const writeId = ++latestWriteRef.current;
+
+      const write = async () => {
+        // A newer save was issued while this one waited its turn, so this write
+        // would only overwrite fresher data. Drop it.
+        if (writeId < latestWriteRef.current) return;
+
+        try {
+          const valuesToStore = filterIncludedOrExcludedFields(
+            values,
+            included,
+            excluded
+          );
+          const serialized = transformValues(valuesToStore, serializer as any);
+          await storageAdapter.setItem(key, JSON.stringify(serialized));
+          onSave?.(valuesToStore);
+        } catch (error) {
+          console.error(`[FORM-STORAGE] Failed to save data: ${error}`);
+        }
+      };
+
+      // Chain on both settle paths so one rejection cannot stall every
+      // subsequent write.
+      const next = writeChainRef.current.then(write, write);
+      writeChainRef.current = next;
+      return next;
     },
     [key, storageAdapter]
   );
