@@ -29,18 +29,26 @@ export const filterIncludedOrExcludedFields = (
  * Debounces a function call.
  * @param cb The function to debounce.
  * @param delay The delay in milliseconds.
- * @returns A debounced version of the function.
+ * @returns A debounced version of the function, with a `cancel` method that
+ * discards any pending call.
  */
 export const debouncer = <T extends (...args: any[]) => any>(
   cb: T,
   delay: number
-) => {
+): T & { cancel: () => void } => {
   let timeout: ReturnType<typeof setTimeout> | null = null;
 
-  return ((...args: Parameters<T>) => {
+  const debounced = (...args: Parameters<T>) => {
     if (timeout) clearTimeout(timeout);
     timeout = setTimeout(() => cb(...args), delay);
-  }) as T;
+  };
+
+  debounced.cancel = () => {
+    if (timeout) clearTimeout(timeout);
+    timeout = null;
+  };
+
+  return debounced as unknown as T & { cancel: () => void };
 };
 
 /**

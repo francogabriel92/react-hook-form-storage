@@ -326,6 +326,37 @@ describe('useFormStorage', () => {
     });
   });
 
+  it('Should cancel a pending debounced save on unmount', async () => {
+    jest.useFakeTimers();
+    const DEBOUNCE_TIME = 300;
+    const onSaveMock = jest.fn();
+
+    const { result, unmount } = renderHook(() => {
+      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
+        debounce: DEBOUNCE_TIME,
+        onSave: onSaveMock,
+      });
+      return { form, formStorage };
+    });
+
+    act(() => {
+      result.current.form.setValue('name', TEST_NAME);
+    });
+
+    unmount();
+
+    act(() => {
+      jest.advanceTimersByTime(DEBOUNCE_TIME * 2);
+    });
+
+    // The pending save must not fire for an unmounted component
+    expect(onSaveMock).not.toHaveBeenCalled();
+    expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
+
+    jest.useRealTimers();
+  });
+
   it('Should apply serialization when saving values', async () => {
     const { setValue } = await renderFormHook({
       included: ['name', 'number'],

@@ -232,11 +232,17 @@ export const useFormStorage = <T extends FieldValues>(
     const handleChange = (values: Record<string, any>) =>
       saveToStorageRef.current(values);
 
-    const subscription = watch(
-      debounce ? debouncer(handleChange, debounce) : handleChange
-    );
+    const debouncedHandleChange = debounce
+      ? debouncer(handleChange, debounce)
+      : null;
 
-    return () => subscription.unsubscribe();
+    const subscription = watch(debouncedHandleChange ?? handleChange);
+
+    return () => {
+      subscription.unsubscribe();
+      // Drop any pending debounced save so it cannot fire after unmount
+      debouncedHandleChange?.cancel();
+    };
   }, [watch, debounce, autoSave]);
 
   return {
