@@ -485,6 +485,46 @@ describe('useFormStorage', () => {
     );
   });
 
+  it('Should not persist a nested excluded path, and should warn', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { setValue } = await renderFormHook({
+      excluded: ['nested.field2'],
+    });
+
+    act(() => {
+      setValue('name', TEST_NAME);
+    });
+
+    // Fails closed: the parent is dropped rather than leaking the excluded field
+    await waitFor(() => {
+      const storedValue = JSON.parse(
+        localStorage.getItem(STORAGE_TEST_KEY) as string
+      );
+      expect(storedValue.nested).toBeUndefined();
+      expect(storedValue.name).toBe(TEST_NAME);
+    });
+
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('nested.field2')
+    );
+  });
+
+  it('Should warn about nested included and serializer paths', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await renderFormHook({
+      included: ['nested.field1'],
+      serializer: {
+        'nested.field1': { serialize: (value: unknown) => value },
+      },
+    } as unknown as Partial<UseFormStorageOptions<typeof FORM_DEFAULT_VALUES>>);
+
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Nested paths are not supported yet')
+    );
+  });
+
   it('Should not save values if autoSave is false', async () => {
     const { setValue } = await renderFormHook({
       autoSave: false,

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   debouncer,
   filterIncludedOrExcludedFields,
+  findNestedPaths,
   transformValues,
 } from './utils';
 import { UseFormStorageOptions } from './types';
@@ -95,6 +96,25 @@ export const useFormStorage = <T extends FieldValues>(
     validate,
     serializer,
   };
+
+  // Nested paths type-check but are not implemented yet, so warn rather than
+  // silently ignoring them. Keyed on the offending paths so it fires once per
+  // distinct misconfiguration instead of on every render.
+  const nestedPaths = [
+    ...findNestedPaths(included),
+    ...findNestedPaths(excluded),
+    ...findNestedPaths(Object.keys(serializer)),
+  ].join(', ');
+
+  useEffect(() => {
+    if (!nestedPaths) return;
+    console.warn(
+      `[FORM-STORAGE] Nested paths are not supported yet and will not be ` +
+        `matched field by field: ${nestedPaths}. An excluded nested path drops ` +
+        `its whole parent object so the value is never persisted; an included ` +
+        `or serialized nested path is ignored. Use top-level fields for now.`
+    );
+  }, [nestedPaths]);
 
   const storageAdapter = useMemo(() => {
     // Resolve the default storage lazily. Evaluating `localStorage` as a

@@ -13,17 +13,37 @@ export const filterIncludedOrExcludedFields = (
   included?: string[],
   excluded?: string[]
 ): Partial<FieldValues> => {
+  // Nested paths are not supported yet (see findNestedPaths). For `excluded`
+  // this has to fail CLOSED: a caller who asked to exclude 'card.cvv' must not
+  // end up persisting it, so drop the whole parent key instead. `included`
+  // stays an exact match — widening it to the parent would persist more than
+  // was asked for.
+  const excludedRoots = excluded?.map((field) => field.split('.')[0]);
+
   return Object.entries(values).reduce((acc, [field, value]) => {
     // If included is defined, only include those fields
     if (included && !included.includes(field)) return acc;
     // If excluded is defined, skip those fields
-    if (excluded && excluded.includes(field)) return acc;
+    if (excludedRoots && excludedRoots.includes(field)) return acc;
     return {
       ...acc,
       [field]: value,
     };
   }, {});
 };
+
+/**
+ * Finds entries that reference a nested (dotted) path.
+ *
+ * `included`, `excluded` and `serializer` keys are typed as `Path<T>`, which
+ * permits nested paths, but the implementations above match top-level keys
+ * only. Callers use this to warn instead of failing silently.
+ *
+ * @param paths The option entries to inspect.
+ * @returns The subset of entries containing a '.'.
+ */
+export const findNestedPaths = (paths?: string[]): string[] =>
+  (paths ?? []).filter((field) => field.includes('.'));
 
 /**
  * Debounces a function call.
