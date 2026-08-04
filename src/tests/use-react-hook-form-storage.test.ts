@@ -620,6 +620,58 @@ describe('useFormStorage', () => {
     });
   });
 
+  it('Should reset isRestored when switching to a key with no stored data', async () => {
+    localStorage.setItem('keyWithData', JSON.stringify(STORAGE_DEFAULT_VALUES));
+
+    const { result, rerender } = renderHook(
+      ({ storageKey }: { storageKey: string }) => {
+        const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+        const formStorage = useFormStorage(storageKey, form);
+        return { form, formStorage };
+      },
+      { initialProps: { storageKey: 'keyWithData' } }
+    );
+
+    await waitFor(() => {
+      expect(result.current.formStorage.isRestored).toBe(true);
+    });
+
+    await act(async () => {
+      rerender({ storageKey: 'keyWithoutData' });
+    });
+
+    // The flag must not carry over from the previous key
+    await waitFor(() => {
+      expect(result.current.formStorage.isRestored).toBe(false);
+    });
+  });
+
+  it('Should reset isRestored after clear', async () => {
+    localStorage.setItem(
+      STORAGE_TEST_KEY,
+      JSON.stringify(STORAGE_DEFAULT_VALUES)
+    );
+
+    // Read through result.current: the flag changes after the initial render,
+    // so a destructured snapshot would go stale.
+    const { result } = renderHook(() => {
+      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+      const formStorage = useFormStorage(STORAGE_TEST_KEY, form);
+      return { form, formStorage };
+    });
+
+    await waitFor(() => {
+      expect(result.current.formStorage.isRestored).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.formStorage.clear();
+    });
+
+    expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
+    expect(result.current.formStorage.isRestored).toBe(false);
+  });
+
   it('Should autosave with the latest key and onSave after a rerender', async () => {
     const onSaveA = jest.fn();
     const onSaveB = jest.fn();

@@ -197,8 +197,12 @@ export const useFormStorage = <T extends FieldValues>(
         });
         setIsRestored(true);
         onRestore?.(valuesToRestore);
+      } else {
+        // Nothing stored under this key: an earlier key may have set the flag.
+        setIsRestored(false);
       }
     } catch (error) {
+      setIsRestored(false);
       console.error(
         `[FORM-STORAGE] Failed to restore data from storage: ${error}`
       );
@@ -208,7 +212,12 @@ export const useFormStorage = <T extends FieldValues>(
   }, [key, storageAdapter, setValue]);
 
   useEffect(() => {
-    if (autoRestore) restoreDataFromStorage();
+    if (autoRestore) {
+      restoreDataFromStorage();
+    } else {
+      // Nothing will be restored for this key until restore() is called.
+      setIsRestored(false);
+    }
     // restoreDataFromStorage is intentionally omitted: it changes with
     // storageAdapter, which callers may pass as an inline object, and
     // re-running the restore on every render would loop. A restore is
@@ -249,7 +258,11 @@ export const useFormStorage = <T extends FieldValues>(
     isRestored,
     isLoading,
     save: async () => saveToStorage(form.getValues()),
-    clear: async () => storageAdapter.removeItem(key),
+    clear: async () => {
+      await storageAdapter.removeItem(key);
+      // Nothing is stored anymore, so nothing is restored either.
+      setIsRestored(false);
+    },
     restore: async () => restoreDataFromStorage(),
   };
 };
