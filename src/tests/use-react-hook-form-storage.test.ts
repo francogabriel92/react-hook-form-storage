@@ -452,6 +452,39 @@ describe('useFormStorage', () => {
     });
   });
 
+  it('Should keep other fields when one serializer throws', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const { setValue } = await renderFormHook({
+      included: ['name', 'email'],
+      serializer: {
+        name: {
+          serialize: () => {
+            throw new Error('Simulated serialize failure');
+          },
+        },
+      },
+    });
+
+    act(() => {
+      setValue('name', TEST_NAME);
+      setValue('email', TEST_EMAIL);
+    });
+
+    // The throwing field keeps its raw value; the rest is unaffected
+    await waitFor(() => {
+      const storedValue = JSON.parse(
+        localStorage.getItem(STORAGE_TEST_KEY) as string
+      );
+      expect(storedValue.email).toBe(TEST_EMAIL);
+      expect(storedValue.name).toBe(TEST_NAME);
+    });
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to serialize field "name"')
+    );
+  });
+
   it('Should not save values if autoSave is false', async () => {
     const { setValue } = await renderFormHook({
       autoSave: false,

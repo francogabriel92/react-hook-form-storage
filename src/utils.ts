@@ -81,7 +81,17 @@ export const transformValues = <T extends FieldValues>(
     // Fall back to identity rather than dropping the field entirely.
     if (!transformFn) return { ...acc, [field]: value };
 
-    const transformedValue = transformFn(value);
-    return { ...acc, [field]: transformedValue };
+    // A user-supplied transform can throw. Contain the failure to this field
+    // instead of losing the whole payload, and keep the raw value.
+    try {
+      return { ...acc, [field]: transformFn(value) };
+    } catch (error) {
+      console.error(
+        `[FORM-STORAGE] Failed to ${
+          deserialize ? 'deserialize' : 'serialize'
+        } field "${field}", keeping the raw value: ${error}`
+      );
+      return { ...acc, [field]: value };
+    }
   }, {});
 };
