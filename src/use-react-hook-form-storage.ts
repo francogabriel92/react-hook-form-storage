@@ -52,7 +52,7 @@ export const useFormStorage = <T extends FieldValues>(
   key: string,
   form: UseFormReturn<T>,
   {
-    storage = localStorage,
+    storage,
     included,
     excluded,
     onRestore,
@@ -72,9 +72,16 @@ export const useFormStorage = <T extends FieldValues>(
   const { setValue, watch } = form;
 
   const storageAdapter = useMemo(() => {
+    // Resolve the default storage lazily. Evaluating `localStorage` as a
+    // default parameter would throw during render in any environment without
+    // it (SSR, Node), so fall back to null there and no-op instead.
+    const resolvedStorage =
+      storage ?? (typeof window !== 'undefined' ? window.localStorage : null);
+
     const setItem = async (key: string, value: string) => {
+      if (!resolvedStorage) return;
       try {
-        return await storage.setItem(key, value);
+        return await resolvedStorage.setItem(key, value);
       } catch (error) {
         console.error(
           `[FORM-STORAGE] Failed to save data to storage: ${error}`
@@ -83,8 +90,9 @@ export const useFormStorage = <T extends FieldValues>(
     };
 
     const getItem = async (key: string) => {
+      if (!resolvedStorage) return null;
       try {
-        return await storage.getItem(key);
+        return await resolvedStorage.getItem(key);
       } catch (error) {
         console.error(
           `[FORM-STORAGE] Failed to restore data from storage: ${error}`
@@ -94,8 +102,9 @@ export const useFormStorage = <T extends FieldValues>(
     };
 
     const removeItem = async (key: string) => {
+      if (!resolvedStorage) return;
       try {
-        return await storage.removeItem(key);
+        return await resolvedStorage.removeItem(key);
       } catch (error) {
         console.error(`[FORM-STORAGE] Failed to clear storage: ${error}`);
       }
