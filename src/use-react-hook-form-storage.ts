@@ -72,10 +72,8 @@ export const useFormStorage = <T extends FieldValues>(
 
   const { setValue, watch } = form;
 
-  // These options are almost always passed as inline literals, so they get a
-  // fresh identity on every render. Reading them through a ref keeps the
-  // save/restore callbacks below referentially stable while still always
-  // seeing the latest values.
+  // Read through a ref, not deps: these are passed as inline literals, so
+  // depending on them would recreate the callbacks and subscription every render.
   const optionsRef = useRef({
     included,
     excluded,
@@ -97,9 +95,6 @@ export const useFormStorage = <T extends FieldValues>(
     serializer,
   };
 
-  // Nested paths type-check but are not implemented yet, so warn rather than
-  // silently ignoring them. Keyed on the offending paths so it fires once per
-  // distinct misconfiguration instead of on every render.
   const nestedPaths = [
     ...findNestedPaths(included),
     ...findNestedPaths(excluded),
@@ -117,9 +112,8 @@ export const useFormStorage = <T extends FieldValues>(
   }, [nestedPaths]);
 
   const storageAdapter = useMemo(() => {
-    // Resolve the default storage lazily. Evaluating `localStorage` as a
-    // default parameter would throw during render in any environment without
-    // it (SSR, Node), so fall back to null there and no-op instead.
+    // Resolved here, not as a default parameter: that would evaluate
+    // `localStorage` during render and throw under SSR.
     const resolvedStorage =
       storage ?? (typeof window !== 'undefined' ? window.localStorage : null);
 
@@ -158,21 +152,18 @@ export const useFormStorage = <T extends FieldValues>(
     return { setItem, getItem, removeItem };
   }, [storage]);
 
-  // Writes are chained so they reach an async adapter in the order they were
-  // issued. Without this, a slow write issued first could resolve after a
-  // faster later one and overwrite storage with stale values.
+  // Chained so writes reach an async adapter in issue order: otherwise a slow
+  // earlier write can resolve last and overwrite fresher values.
   const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
   const latestWriteRef = useRef(0);
 
-  // Save form values to storage
   const saveToStorage = useCallback(
     async (values: Record<string, any>) => {
       const { included, excluded, serializer, onSave } = optionsRef.current;
       const writeId = ++latestWriteRef.current;
 
       const write = async () => {
-        // A newer save was issued while this one waited its turn, so this write
-        // would only overwrite fresher data. Drop it.
+        // Superseded while queued.
         if (writeId < latestWriteRef.current) return;
 
         try {
@@ -189,8 +180,7 @@ export const useFormStorage = <T extends FieldValues>(
         }
       };
 
-      // Chain on both settle paths so one rejection cannot stall every
-      // subsequent write.
+      // Both branches: a rejection must not stall every later write.
       const next = writeChainRef.current.then(write, write);
       writeChainRef.current = next;
       return next;
@@ -198,7 +188,6 @@ export const useFormStorage = <T extends FieldValues>(
     [key, storageAdapter]
   );
 
-  // Restore initial values from storage if available
   const restoreDataFromStorage = useCallback(async () => {
     const {
       included,
@@ -238,7 +227,6 @@ export const useFormStorage = <T extends FieldValues>(
         setIsRestored(true);
         onRestore?.(valuesToRestore);
       } else {
-        // Nothing stored under this key: an earlier key may have set the flag.
         setIsRestored(false);
       }
     } catch (error) {
@@ -255,27 +243,21 @@ export const useFormStorage = <T extends FieldValues>(
     if (autoRestore) {
       restoreDataFromStorage();
     } else {
-      // Nothing will be restored for this key until restore() is called.
       setIsRestored(false);
     }
-    // restoreDataFromStorage is intentionally omitted: it changes with
-    // storageAdapter, which callers may pass as an inline object, and
-    // re-running the restore on every render would loop. A restore is
-    // re-triggered only when the key or autoRestore changes.
+    // restoreDataFromStorage omitted: it changes with storageAdapter, which
+    // callers may pass inline, so including it would restore on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRestore, key]);
 
-  // The watch subscription outlives the render that created it, so it must not
-  // close over saveToStorage directly — otherwise a later rerender that changes
-  // the key or onSave would keep autosaving through the old one.
+  // The subscription below outlives this render, so it must not close over
+  // saveToStorage directly or it would keep using a stale key and onSave.
   const saveToStorageRef = useRef(saveToStorage);
   useEffect(() => {
     saveToStorageRef.current = saveToStorage;
   }, [saveToStorage]);
 
-  // Watch for changes in form values and update storage
   useEffect(() => {
-    // Cancel if autoSave is disabled
     if (!autoSave) return;
 
     const handleChange = (values: Record<string, any>) =>
@@ -289,7 +271,6 @@ export const useFormStorage = <T extends FieldValues>(
 
     return () => {
       subscription.unsubscribe();
-      // Drop any pending debounced save so it cannot fire after unmount
       debouncedHandleChange?.cancel();
     };
   }, [watch, debounce, autoSave]);
@@ -300,7 +281,6 @@ export const useFormStorage = <T extends FieldValues>(
     save: async () => saveToStorage(form.getValues()),
     clear: async () => {
       await storageAdapter.removeItem(key);
-      // Nothing is stored anymore, so nothing is restored either.
       setIsRestored(false);
     },
     restore: async () => restoreDataFromStorage(),

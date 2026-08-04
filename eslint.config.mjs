@@ -40,8 +40,7 @@ export default [
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
       '@typescript-eslint/no-explicit-any': 'warn',
-      // Allow `_`-prefixed names so intentional destructuring discards
-      // (e.g. `const { name: _name, ...rest } = values`) are not errors.
+      // `_`-prefixed names are intentional discards.
       '@typescript-eslint/no-unused-vars': [
         'error',
         {

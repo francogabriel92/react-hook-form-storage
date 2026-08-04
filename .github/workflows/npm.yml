@@ -1,18 +1,14 @@
 name: Publish to NPM
 
-# The version in package.json is the single source of truth: bump it in a normal
-# PR alongside its CHANGELOG entry, then dispatch this workflow. It publishes
-# exactly the committed version and tags it — it never bumps, so there is no way
-# for the published version to disagree with the committed one.
+# package.json is the source of truth: bump it in a PR, then dispatch. This
+# publishes the committed version and never bumps.
 on:
   workflow_dispatch:
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # Publishing is only ever valid from the default branch. workflow_dispatch can
-    # be triggered from any ref, and without this guard that would bump, tag and
-    # publish whatever happened to be on that branch.
+    # workflow_dispatch fires from any ref; without this it would publish that branch.
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: write
@@ -73,7 +69,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Tag the published version
-        # Only after a successful publish, so a failed release leaves no tag.
+        # After publish, so a failed release leaves no tag.
         run: |
           VERSION='${{ steps.version.outputs.value }}'
           git tag -a "v$VERSION" -m "release: v$VERSION"

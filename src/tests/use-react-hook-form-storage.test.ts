@@ -357,7 +357,6 @@ describe('useFormStorage', () => {
       jest.advanceTimersByTime(DEBOUNCE_TIME * 2);
     });
 
-    // The pending save must not fire for an unmounted component
     expect(onSaveMock).not.toHaveBeenCalled();
     expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
 
@@ -436,14 +435,12 @@ describe('useFormStorage', () => {
       },
     });
 
-    // Restoring without a deserialize must not drop the field
     expect(getValues('name')).toBe(STORAGE_DEFAULT_VALUES.name);
 
     act(() => {
       setValue('name', TEST_NAME);
     });
 
-    // Saving still applies the direction that IS defined
     await waitFor(() => {
       const storedValue = JSON.parse(
         localStorage.getItem(STORAGE_TEST_KEY) as string
@@ -471,7 +468,6 @@ describe('useFormStorage', () => {
       setValue('email', TEST_EMAIL);
     });
 
-    // The throwing field keeps its raw value; the rest is unaffected
     await waitFor(() => {
       const storedValue = JSON.parse(
         localStorage.getItem(STORAGE_TEST_KEY) as string
@@ -654,7 +650,7 @@ describe('useFormStorage', () => {
       expect(JSON.parse(storedValue as string).name).toBe('SECOND');
     });
 
-    // Let the slow write settle and confirm it did not clobber the newer value
+    // Let the slow write settle: it must not clobber the newer value.
     await act(async () => {
       await new Promise((res) => setTimeout(res, 150));
     });

@@ -19,9 +19,7 @@ module.exports = {
   ],
   coverageReporters: ['json', 'lcov', 'text', 'clover'],
   coverageDirectory: 'coverage',
-  // Floors set just under the current numbers (94.7 stmts / 89.7 branch /
-  // 100 funcs / 97.4 lines) so coverage cannot silently regress, with enough
-  // headroom that a small honest change does not fail the build.
+  // Floors just under current (94.7 / 89.7 / 100 / 97.4).
   coverageThreshold: {
     global: {
       statements: 93,

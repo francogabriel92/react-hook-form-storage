@@ -13,17 +13,14 @@ export const filterIncludedOrExcludedFields = (
   included?: string[],
   excluded?: string[]
 ): Partial<FieldValues> => {
-  // Nested paths are not supported yet (see findNestedPaths). For `excluded`
-  // this has to fail CLOSED: a caller who asked to exclude 'card.cvv' must not
-  // end up persisting it, so drop the whole parent key instead. `included`
-  // stays an exact match — widening it to the parent would persist more than
+  // Nested paths are unsupported, so `excluded` fails closed: excluding
+  // 'card.cvv' drops all of `card` rather than persisting the secret. Do NOT
+  // mirror this for `included` — widening to the parent would persist more than
   // was asked for.
   const excludedRoots = excluded?.map((field) => field.split('.')[0]);
 
   return Object.entries(values).reduce((acc, [field, value]) => {
-    // If included is defined, only include those fields
     if (included && !included.includes(field)) return acc;
-    // If excluded is defined, skip those fields
     if (excludedRoots && excludedRoots.includes(field)) return acc;
     return {
       ...acc,
@@ -33,12 +30,8 @@ export const filterIncludedOrExcludedFields = (
 };
 
 /**
- * Finds entries that reference a nested (dotted) path.
- *
- * `included`, `excluded` and `serializer` keys are typed as `Path<T>`, which
- * permits nested paths, but the implementations above match top-level keys
- * only. Callers use this to warn instead of failing silently.
- *
+ * Finds entries that reference a nested (dotted) path, which the filters above
+ * cannot match. Callers use this to warn instead of failing silently.
  * @param paths The option entries to inspect.
  * @returns The subset of entries containing a '.'.
  */
@@ -97,12 +90,10 @@ export const transformValues = <T extends FieldValues>(
       ? fieldSerializer.deserialize
       : fieldSerializer.serialize;
 
-    // Both directions are optional, so a serializer may define only one.
-    // Fall back to identity rather than dropping the field entirely.
+    // Both directions are optional: fall back to identity, never drop the field.
     if (!transformFn) return { ...acc, [field]: value };
 
-    // A user-supplied transform can throw. Contain the failure to this field
-    // instead of losing the whole payload, and keep the raw value.
+    // Contain a throwing transform to its own field.
     try {
       return { ...acc, [field]: transformFn(value) };
     } catch (error) {
