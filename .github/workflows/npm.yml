@@ -63,6 +63,18 @@ jobs:
             exit 1
           fi
 
+      - name: Extract the release notes
+        # Before publishing: npm publish is irreversible, so everything that can
+        # refuse the release has to fail first.
+        run: |
+          VERSION='${{ steps.version.outputs.value }}'
+          awk -v v="## [$VERSION]" '$0==v{f=1;next} /^## \[/{f=0} f' \
+            CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "CHANGELOG.md has no '## [$VERSION]' section. Add one first."
+            exit 1
+          fi
+
       - name: Publish to NPM
         run: npm publish --provenance --access public
         env:
@@ -74,3 +86,13 @@ jobs:
           VERSION='${{ steps.version.outputs.value }}'
           git tag -a "v$VERSION" -m "release: v$VERSION"
           git push origin "v$VERSION"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION='${{ steps.version.outputs.value }}'
+          gh release create "v$VERSION" \
+            --verify-tag \
+            --title "v$VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md"
