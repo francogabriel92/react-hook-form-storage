@@ -1,5 +1,5 @@
 import type { FieldValues, Path, UseFormReturn } from 'react-hook-form';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   debouncer,
   filterIncludedOrExcludedFields,
@@ -71,6 +71,31 @@ export const useFormStorage = <T extends FieldValues>(
 
   const { setValue, watch } = form;
 
+  // These options are almost always passed as inline literals, so they get a
+  // fresh identity on every render. Reading them through a ref keeps the
+  // save/restore callbacks below referentially stable while still always
+  // seeing the latest values.
+  const optionsRef = useRef({
+    included,
+    excluded,
+    onRestore,
+    onSave,
+    dirty,
+    touched,
+    validate,
+    serializer,
+  });
+  optionsRef.current = {
+    included,
+    excluded,
+    onRestore,
+    onSave,
+    dirty,
+    touched,
+    validate,
+    serializer,
+  };
+
   const storageAdapter = useMemo(() => {
     // Resolve the default storage lazily. Evaluating `localStorage` as a
     // default parameter would throw during render in any environment without
@@ -116,6 +141,7 @@ export const useFormStorage = <T extends FieldValues>(
   // Save form values to storage
   const saveToStorage = useCallback(
     async (values: Record<string, any>) => {
+      const { included, excluded, serializer, onSave } = optionsRef.current;
       try {
         const valuesToStore = filterIncludedOrExcludedFields(
           values,
@@ -129,11 +155,20 @@ export const useFormStorage = <T extends FieldValues>(
         console.error(`[FORM-STORAGE] Failed to save data: ${error}`);
       }
     },
-    [key, included, excluded, serializer, storageAdapter, onSave]
+    [key, storageAdapter]
   );
 
   // Restore initial values from storage if available
   const restoreDataFromStorage = useCallback(async () => {
+    const {
+      included,
+      excluded,
+      serializer,
+      onRestore,
+      dirty,
+      touched,
+      validate,
+    } = optionsRef.current;
     setIsLoading(true);
     try {
       const storedValue = await storageAdapter.getItem(key);
@@ -170,23 +205,38 @@ export const useFormStorage = <T extends FieldValues>(
     } finally {
       setIsLoading(false);
     }
-  }, [included, excluded, serializer, setValue]);
+  }, [key, storageAdapter, setValue]);
 
   useEffect(() => {
     if (autoRestore) restoreDataFromStorage();
-  }, [autoRestore]);
+    // restoreDataFromStorage is intentionally omitted: it changes with
+    // storageAdapter, which callers may pass as an inline object, and
+    // re-running the restore on every render would loop. A restore is
+    // re-triggered only when the key or autoRestore changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRestore, key]);
+
+  // The watch subscription outlives the render that created it, so it must not
+  // close over saveToStorage directly — otherwise a later rerender that changes
+  // the key or onSave would keep autosaving through the old one.
+  const saveToStorageRef = useRef(saveToStorage);
+  useEffect(() => {
+    saveToStorageRef.current = saveToStorage;
+  }, [saveToStorage]);
 
   // Watch for changes in form values and update storage
   useEffect(() => {
     // Cancel if autoSave is disabled
     if (!autoSave) return;
 
-    const subscription = debounce
-      ? watch(debouncer(saveToStorage, debounce))
-      : watch(saveToStorage);
+    const handleChange = (values: Record<string, any>) =>
+      saveToStorageRef.current(values);
+
+    const subscription = watch(
+      debounce ? debouncer(handleChange, debounce) : handleChange
+    );
 
     return () => subscription.unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watch, debounce, autoSave]);
 
   return {

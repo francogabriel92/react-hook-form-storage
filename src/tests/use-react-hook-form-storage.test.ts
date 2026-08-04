@@ -558,6 +558,75 @@ describe('useFormStorage', () => {
     });
   });
 
+  it('Should autosave with the latest key and onSave after a rerender', async () => {
+    const onSaveA = jest.fn();
+    const onSaveB = jest.fn();
+
+    const { result, rerender } = renderHook(
+      ({ storageKey, onSave }: { storageKey: string; onSave: jest.Mock }) => {
+        const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+        const formStorage = useFormStorage(storageKey, form, {
+          onSave: onSave as (values: Record<string, any>) => void,
+        });
+        return { form, formStorage };
+      },
+      { initialProps: { storageKey: 'keyA', onSave: onSaveA } }
+    );
+
+    await act(async () => {
+      rerender({ storageKey: 'keyB', onSave: onSaveB });
+    });
+
+    act(() => {
+      result.current.form.setValue('name', TEST_NAME);
+    });
+
+    await waitFor(() => {
+      expect(localStorage.getItem('keyB')).toBe(
+        JSON.stringify({ ...FORM_DEFAULT_VALUES, name: TEST_NAME })
+      );
+    });
+
+    // A stale subscription would have written to the old key and callback
+    expect(localStorage.getItem('keyA')).toBeNull();
+    expect(onSaveA).not.toHaveBeenCalled();
+    expect(onSaveB).toHaveBeenCalledWith({
+      ...FORM_DEFAULT_VALUES,
+      name: TEST_NAME,
+    });
+  });
+
+  it('Should honor inline options updated on rerender', async () => {
+    const { result, rerender } = renderHook(
+      ({ excludedField }: { excludedField: 'name' | 'email' }) => {
+        const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+        // Inline array: a fresh reference on every render
+        const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
+          excluded: [excludedField],
+        });
+        return { form, formStorage };
+      },
+      { initialProps: { excludedField: 'email' as const } }
+    );
+
+    await act(async () => {
+      rerender({ excludedField: 'name' });
+    });
+
+    act(() => {
+      result.current.form.setValue('name', TEST_NAME);
+    });
+
+    await waitFor(() => {
+      const storedValue = JSON.parse(
+        localStorage.getItem(STORAGE_TEST_KEY) as string
+      );
+      // The latest excluded list applies: name omitted, email kept
+      expect(storedValue.name).toBeUndefined();
+      expect(storedValue.email).toBe(FORM_DEFAULT_VALUES.email);
+    });
+  });
+
   it('Should handle non autoRestore scenarios', async () => {
     localStorage.setItem(
       STORAGE_TEST_KEY,
