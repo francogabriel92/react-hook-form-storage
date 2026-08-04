@@ -1,7 +1,7 @@
 {
   "name": "react-hook-form-storage",
-  "version": "1.3.0",
-  "description": "A TypeScript library for React Hook Form persist functionality",
+  "version": "1.3.1",
+  "description": "Persist React Hook Form state to localStorage/sessionStorage/async storage — TypeScript-first, SSR-safe, with serializers & debounce.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
@@ -23,12 +23,17 @@
     "react",
     "react-hook-form",
     "react-hook-forms",
+    "react-hook-form-persist",
     "form",
     "persist",
     "persistent",
     "persistent-storage",
     "localstorage",
-    "sessionstorage"
+    "sessionstorage",
+    "autosave",
+    "draft",
+    "ssr",
+    "nextjs"
   ],
   "author": "Franco Sánchez <francog.sanchez@hotmail.com>",
   "license": "MIT",
