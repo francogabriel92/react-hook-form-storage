@@ -1,7 +1,7 @@
 import { beforeEach, describe, it, expect, jest } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useForm } from 'react-hook-form';
-import { UseFormStorageAdapter, UseFormStorageOptions } from '../types';
+import { UseFormStorageOptions } from '../types';
 import { useFormStorage } from '../use-react-hook-form-storage';
 import { createMockRemoteStore } from './test-utils';
 
@@ -143,10 +143,11 @@ describe('useFormStorage', () => {
     });
 
     // Assert that localStorage was updated
-    const storedValue = localStorage.getItem(STORAGE_TEST_KEY);
-    expect(storedValue).toBe(
-      JSON.stringify({ ...FORM_DEFAULT_VALUES, name: TEST_NAME })
-    );
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_TEST_KEY)).toBe(
+        JSON.stringify({ ...FORM_DEFAULT_VALUES, name: TEST_NAME })
+      );
+    });
   });
 
   it('Should not save excluded fields to localStorage', async () => {
@@ -158,9 +159,12 @@ describe('useFormStorage', () => {
       setValue('name', TEST_NAME);
     });
 
-    const storedValue = localStorage.getItem(STORAGE_TEST_KEY);
     const { name: _name, ...valuesWithoutName } = FORM_DEFAULT_VALUES;
-    expect(storedValue).toBe(JSON.stringify(valuesWithoutName));
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_TEST_KEY)).toBe(
+        JSON.stringify(valuesWithoutName)
+      );
+    });
   });
 
   it('Should save only included fields to localStorage', async () => {
@@ -173,8 +177,11 @@ describe('useFormStorage', () => {
       setValue('email', TEST_EMAIL);
     });
 
-    const storedValue = localStorage.getItem(STORAGE_TEST_KEY);
-    expect(storedValue).toBe(JSON.stringify({ name: TEST_NAME }));
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_TEST_KEY)).toBe(
+        JSON.stringify({ name: TEST_NAME })
+      );
+    });
   });
 
   it('Should only loads values from localStorage that are not excluded', async () => {
@@ -276,15 +283,15 @@ describe('useFormStorage', () => {
       setValue('name', TEST_NAME);
     });
 
-    const storedValue = sessionStorage.getItem(STORAGE_TEST_KEY);
-
-    expect(storedValue).toBe(
-      JSON.stringify({
-        ...FORM_DEFAULT_VALUES,
-        ...STORAGE_DEFAULT_VALUES,
-        name: TEST_NAME,
-      })
-    );
+    await waitFor(() => {
+      expect(sessionStorage.getItem(STORAGE_TEST_KEY)).toBe(
+        JSON.stringify({
+          ...FORM_DEFAULT_VALUES,
+          ...STORAGE_DEFAULT_VALUES,
+          name: TEST_NAME,
+        })
+      );
+    });
 
     // Assert that localStorage was not used
     expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
@@ -324,6 +331,36 @@ describe('useFormStorage', () => {
       expect(storedValue).toBe(JSON.stringify(expectedValue));
       expect(onSaveMock).toHaveBeenCalledWith(expectedValue);
     });
+  });
+
+  it('Should cancel a pending debounced save on unmount', async () => {
+    jest.useFakeTimers();
+    const DEBOUNCE_TIME = 300;
+    const onSaveMock = jest.fn();
+
+    const { result, unmount } = renderHook(() => {
+      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
+        debounce: DEBOUNCE_TIME,
+        onSave: onSaveMock,
+      });
+      return { form, formStorage };
+    });
+
+    act(() => {
+      result.current.form.setValue('name', TEST_NAME);
+    });
+
+    unmount();
+
+    act(() => {
+      jest.advanceTimersByTime(DEBOUNCE_TIME * 2);
+    });
+
+    expect(onSaveMock).not.toHaveBeenCalled();
+    expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
+
+    jest.useRealTimers();
   });
 
   it('Should apply serialization when saving values', async () => {
@@ -383,6 +420,107 @@ describe('useFormStorage', () => {
     expect(getValues('number')).toBe(9);
   });
 
+  it('Should keep the field value when the serializer defines only one direction', async () => {
+    localStorage.setItem(
+      STORAGE_TEST_KEY,
+      JSON.stringify(STORAGE_DEFAULT_VALUES)
+    );
+
+    const { getValues, setValue } = await renderFormHook({
+      serializer: {
+        name: {
+          serialize: (value) => value.toUpperCase(),
+          // no deserialize: restoring must keep the stored value as-is
+        },
+      },
+    });
+
+    expect(getValues('name')).toBe(STORAGE_DEFAULT_VALUES.name);
+
+    act(() => {
+      setValue('name', TEST_NAME);
+    });
+
+    await waitFor(() => {
+      const storedValue = JSON.parse(
+        localStorage.getItem(STORAGE_TEST_KEY) as string
+      );
+      expect(storedValue.name).toBe(TEST_NAME.toUpperCase());
+    });
+  });
+
+  it('Should keep other fields when one serializer throws', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const { setValue } = await renderFormHook({
+      included: ['name', 'email'],
+      serializer: {
+        name: {
+          serialize: () => {
+            throw new Error('Simulated serialize failure');
+          },
+        },
+      },
+    });
+
+    act(() => {
+      setValue('name', TEST_NAME);
+      setValue('email', TEST_EMAIL);
+    });
+
+    await waitFor(() => {
+      const storedValue = JSON.parse(
+        localStorage.getItem(STORAGE_TEST_KEY) as string
+      );
+      expect(storedValue.email).toBe(TEST_EMAIL);
+      expect(storedValue.name).toBe(TEST_NAME);
+    });
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to serialize field "name"')
+    );
+  });
+
+  it('Should not persist a nested excluded path, and should warn', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { setValue } = await renderFormHook({
+      excluded: ['nested.field2'],
+    });
+
+    act(() => {
+      setValue('name', TEST_NAME);
+    });
+
+    // Fails closed: the parent is dropped rather than leaking the excluded field
+    await waitFor(() => {
+      const storedValue = JSON.parse(
+        localStorage.getItem(STORAGE_TEST_KEY) as string
+      );
+      expect(storedValue.nested).toBeUndefined();
+      expect(storedValue.name).toBe(TEST_NAME);
+    });
+
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('nested.field2')
+    );
+  });
+
+  it('Should warn about nested included and serializer paths', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await renderFormHook({
+      included: ['nested.field1'],
+      serializer: {
+        'nested.field1': { serialize: (value: unknown) => value },
+      },
+    } as unknown as Partial<UseFormStorageOptions<typeof FORM_DEFAULT_VALUES>>);
+
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Nested paths are not supported yet')
+    );
+  });
+
   it('Should not save values if autoSave is false', async () => {
     const { setValue } = await renderFormHook({
       autoSave: false,
@@ -404,8 +542,8 @@ describe('useFormStorage', () => {
     });
 
     // Call save function
-    act(() => {
-      formStorage.save();
+    await act(async () => {
+      await formStorage.save();
     });
 
     // Assert that localStorage was updated
@@ -434,10 +572,11 @@ describe('useFormStorage', () => {
     });
 
     // Assert that localStorage was updated with serialized array
-    const storedValue = localStorage.getItem(STORAGE_TEST_KEY);
-    expect(storedValue).toBe(
-      JSON.stringify({ ...FORM_DEFAULT_VALUES, list: TEST_LIST.join(',') })
-    );
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_TEST_KEY)).toBe(
+        JSON.stringify({ ...FORM_DEFAULT_VALUES, list: TEST_LIST.join(',') })
+      );
+    });
   });
 
   it('Should work with custom async storage', async () => {
@@ -489,6 +628,35 @@ describe('useFormStorage', () => {
       const storedValue = await mockStorage.getItem(STORAGE_TEST_KEY);
       expect(storedValue).toBeNull();
     });
+  });
+
+  it('Should not let a slow earlier write overwrite a faster later one', async () => {
+    // First write is slow, second is immediate: without ordering the second
+    // lands first and the first then overwrites it with stale values.
+    const mockStorage = createMockRemoteStore({
+      delayMs: 0,
+      saveDelaysMs: [80, 0],
+    });
+
+    const { setValue } = await renderFormHook({ storage: mockStorage });
+
+    act(() => {
+      setValue('name', 'FIRST');
+      setValue('name', 'SECOND');
+    });
+
+    await waitFor(async () => {
+      const storedValue = await mockStorage.getItem(STORAGE_TEST_KEY);
+      expect(JSON.parse(storedValue as string).name).toBe('SECOND');
+    });
+
+    // Let the slow write settle: it must not clobber the newer value.
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 150));
+    });
+
+    const finalValue = await mockStorage.getItem(STORAGE_TEST_KEY);
+    expect(JSON.parse(finalValue as string).name).toBe('SECOND');
   });
 
   it('Should handle errors when restored malformatted storage', async () => {
@@ -555,6 +723,127 @@ describe('useFormStorage', () => {
       expect(console.error).toHaveBeenCalledWith(
         expect.stringContaining('Failed to clear storage')
       );
+    });
+  });
+
+  it('Should reset isRestored when switching to a key with no stored data', async () => {
+    localStorage.setItem('keyWithData', JSON.stringify(STORAGE_DEFAULT_VALUES));
+
+    const { result, rerender } = renderHook(
+      ({ storageKey }: { storageKey: string }) => {
+        const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+        const formStorage = useFormStorage(storageKey, form);
+        return { form, formStorage };
+      },
+      { initialProps: { storageKey: 'keyWithData' } }
+    );
+
+    await waitFor(() => {
+      expect(result.current.formStorage.isRestored).toBe(true);
+    });
+
+    await act(async () => {
+      rerender({ storageKey: 'keyWithoutData' });
+    });
+
+    // The flag must not carry over from the previous key
+    await waitFor(() => {
+      expect(result.current.formStorage.isRestored).toBe(false);
+    });
+  });
+
+  it('Should reset isRestored after clear', async () => {
+    localStorage.setItem(
+      STORAGE_TEST_KEY,
+      JSON.stringify(STORAGE_DEFAULT_VALUES)
+    );
+
+    // Read through result.current: the flag changes after the initial render,
+    // so a destructured snapshot would go stale.
+    const { result } = renderHook(() => {
+      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+      const formStorage = useFormStorage(STORAGE_TEST_KEY, form);
+      return { form, formStorage };
+    });
+
+    await waitFor(() => {
+      expect(result.current.formStorage.isRestored).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.formStorage.clear();
+    });
+
+    expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
+    expect(result.current.formStorage.isRestored).toBe(false);
+  });
+
+  it('Should autosave with the latest key and onSave after a rerender', async () => {
+    const onSaveA = jest.fn();
+    const onSaveB = jest.fn();
+
+    const { result, rerender } = renderHook(
+      ({ storageKey, onSave }: { storageKey: string; onSave: jest.Mock }) => {
+        const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+        const formStorage = useFormStorage(storageKey, form, {
+          onSave: onSave as (values: Record<string, any>) => void,
+        });
+        return { form, formStorage };
+      },
+      { initialProps: { storageKey: 'keyA', onSave: onSaveA } }
+    );
+
+    await act(async () => {
+      rerender({ storageKey: 'keyB', onSave: onSaveB });
+    });
+
+    act(() => {
+      result.current.form.setValue('name', TEST_NAME);
+    });
+
+    await waitFor(() => {
+      expect(localStorage.getItem('keyB')).toBe(
+        JSON.stringify({ ...FORM_DEFAULT_VALUES, name: TEST_NAME })
+      );
+    });
+
+    // A stale subscription would have written to the old key and callback
+    expect(localStorage.getItem('keyA')).toBeNull();
+    expect(onSaveA).not.toHaveBeenCalled();
+    expect(onSaveB).toHaveBeenCalledWith({
+      ...FORM_DEFAULT_VALUES,
+      name: TEST_NAME,
+    });
+  });
+
+  it('Should honor inline options updated on rerender', async () => {
+    const { result, rerender } = renderHook(
+      ({ excludedField }: { excludedField: 'name' | 'email' }) => {
+        const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+        // Inline array: a fresh reference on every render
+        const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
+          excluded: [excludedField],
+        });
+        return { form, formStorage };
+      },
+      { initialProps: { excludedField: 'email' as const } }
+    );
+
+    await act(async () => {
+      rerender({ excludedField: 'name' });
+    });
+
+    act(() => {
+      result.current.form.setValue('name', TEST_NAME);
+    });
+
+    await waitFor(() => {
+      const storedValue = JSON.parse(
+        localStorage.getItem(STORAGE_TEST_KEY) as string
+      );
+      // The latest excluded list applies: name omitted, email kept
+      expect(storedValue.name).toBeUndefined();
+      expect(storedValue.email).toBe(FORM_DEFAULT_VALUES.email);
     });
   });
 

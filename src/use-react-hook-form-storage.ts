@@ -1,8 +1,9 @@
 import type { FieldValues, Path, UseFormReturn } from 'react-hook-form';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   debouncer,
   filterIncludedOrExcludedFields,
+  findNestedPaths,
   transformValues,
 } from './utils';
 import { UseFormStorageOptions } from './types';
@@ -52,7 +53,7 @@ export const useFormStorage = <T extends FieldValues>(
   key: string,
   form: UseFormReturn<T>,
   {
-    storage = localStorage,
+    storage,
     included,
     excluded,
     onRestore,
@@ -71,10 +72,55 @@ export const useFormStorage = <T extends FieldValues>(
 
   const { setValue, watch } = form;
 
+  // Read through a ref, not deps: these are passed as inline literals, so
+  // depending on them would recreate the callbacks and subscription every render.
+  const optionsRef = useRef({
+    included,
+    excluded,
+    onRestore,
+    onSave,
+    dirty,
+    touched,
+    validate,
+    serializer,
+  });
+  optionsRef.current = {
+    included,
+    excluded,
+    onRestore,
+    onSave,
+    dirty,
+    touched,
+    validate,
+    serializer,
+  };
+
+  const nestedPaths = [
+    ...findNestedPaths(included),
+    ...findNestedPaths(excluded),
+    ...findNestedPaths(Object.keys(serializer)),
+  ].join(', ');
+
+  useEffect(() => {
+    if (!nestedPaths) return;
+    console.warn(
+      `[FORM-STORAGE] Nested paths are not supported yet and will not be ` +
+        `matched field by field: ${nestedPaths}. An excluded nested path drops ` +
+        `its whole parent object so the value is never persisted; an included ` +
+        `or serialized nested path is ignored. Use top-level fields for now.`
+    );
+  }, [nestedPaths]);
+
   const storageAdapter = useMemo(() => {
+    // Resolved here, not as a default parameter: that would evaluate
+    // `localStorage` during render and throw under SSR.
+    const resolvedStorage =
+      storage ?? (typeof window !== 'undefined' ? window.localStorage : null);
+
     const setItem = async (key: string, value: string) => {
+      if (!resolvedStorage) return;
       try {
-        return await storage.setItem(key, value);
+        return await resolvedStorage.setItem(key, value);
       } catch (error) {
         console.error(
           `[FORM-STORAGE] Failed to save data to storage: ${error}`
@@ -83,8 +129,9 @@ export const useFormStorage = <T extends FieldValues>(
     };
 
     const getItem = async (key: string) => {
+      if (!resolvedStorage) return null;
       try {
-        return await storage.getItem(key);
+        return await resolvedStorage.getItem(key);
       } catch (error) {
         console.error(
           `[FORM-STORAGE] Failed to restore data from storage: ${error}`
@@ -94,8 +141,9 @@ export const useFormStorage = <T extends FieldValues>(
     };
 
     const removeItem = async (key: string) => {
+      if (!resolvedStorage) return;
       try {
-        return await storage.removeItem(key);
+        return await resolvedStorage.removeItem(key);
       } catch (error) {
         console.error(`[FORM-STORAGE] Failed to clear storage: ${error}`);
       }
@@ -104,27 +152,52 @@ export const useFormStorage = <T extends FieldValues>(
     return { setItem, getItem, removeItem };
   }, [storage]);
 
-  // Save form values to storage
+  // Chained so writes reach an async adapter in issue order: otherwise a slow
+  // earlier write can resolve last and overwrite fresher values.
+  const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const latestWriteRef = useRef(0);
+
   const saveToStorage = useCallback(
     async (values: Record<string, any>) => {
-      try {
-        const valuesToStore = filterIncludedOrExcludedFields(
-          values,
-          included,
-          excluded
-        );
-        const serialized = transformValues(valuesToStore, serializer as any);
-        await storageAdapter.setItem(key, JSON.stringify(serialized));
-        onSave?.(valuesToStore);
-      } catch (error) {
-        console.error(`[FORM-STORAGE] Failed to save data: ${error}`);
-      }
+      const { included, excluded, serializer, onSave } = optionsRef.current;
+      const writeId = ++latestWriteRef.current;
+
+      const write = async () => {
+        // Superseded while queued.
+        if (writeId < latestWriteRef.current) return;
+
+        try {
+          const valuesToStore = filterIncludedOrExcludedFields(
+            values,
+            included,
+            excluded
+          );
+          const serialized = transformValues(valuesToStore, serializer as any);
+          await storageAdapter.setItem(key, JSON.stringify(serialized));
+          onSave?.(valuesToStore);
+        } catch (error) {
+          console.error(`[FORM-STORAGE] Failed to save data: ${error}`);
+        }
+      };
+
+      // Both branches: a rejection must not stall every later write.
+      const next = writeChainRef.current.then(write, write);
+      writeChainRef.current = next;
+      return next;
     },
-    [key, included, excluded, serializer, storageAdapter, onSave]
+    [key, storageAdapter]
   );
 
-  // Restore initial values from storage if available
   const restoreDataFromStorage = useCallback(async () => {
+    const {
+      included,
+      excluded,
+      serializer,
+      onRestore,
+      dirty,
+      touched,
+      validate,
+    } = optionsRef.current;
     setIsLoading(true);
     try {
       const storedValue = await storageAdapter.getItem(key);
@@ -153,38 +226,63 @@ export const useFormStorage = <T extends FieldValues>(
         });
         setIsRestored(true);
         onRestore?.(valuesToRestore);
+      } else {
+        setIsRestored(false);
       }
     } catch (error) {
+      setIsRestored(false);
       console.error(
         `[FORM-STORAGE] Failed to restore data from storage: ${error}`
       );
     } finally {
       setIsLoading(false);
     }
-  }, [included, excluded, serializer, setValue]);
+  }, [key, storageAdapter, setValue]);
 
   useEffect(() => {
-    if (autoRestore) restoreDataFromStorage();
-  }, [autoRestore]);
+    if (autoRestore) {
+      restoreDataFromStorage();
+    } else {
+      setIsRestored(false);
+    }
+    // restoreDataFromStorage omitted: it changes with storageAdapter, which
+    // callers may pass inline, so including it would restore on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRestore, key]);
 
-  // Watch for changes in form values and update storage
+  // The subscription below outlives this render, so it must not close over
+  // saveToStorage directly or it would keep using a stale key and onSave.
+  const saveToStorageRef = useRef(saveToStorage);
   useEffect(() => {
-    // Cancel if autoSave is disabled
+    saveToStorageRef.current = saveToStorage;
+  }, [saveToStorage]);
+
+  useEffect(() => {
     if (!autoSave) return;
 
-    const subscription = debounce
-      ? watch(debouncer(saveToStorage, debounce))
-      : watch(saveToStorage);
+    const handleChange = (values: Record<string, any>) =>
+      saveToStorageRef.current(values);
 
-    return () => subscription.unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const debouncedHandleChange = debounce
+      ? debouncer(handleChange, debounce)
+      : null;
+
+    const subscription = watch(debouncedHandleChange ?? handleChange);
+
+    return () => {
+      subscription.unsubscribe();
+      debouncedHandleChange?.cancel();
+    };
   }, [watch, debounce, autoSave]);
 
   return {
     isRestored,
     isLoading,
     save: async () => saveToStorage(form.getValues()),
-    clear: async () => storageAdapter.removeItem(key),
+    clear: async () => {
+      await storageAdapter.removeItem(key);
+      setIsRestored(false);
+    },
     restore: async () => restoreDataFromStorage(),
   };
 };

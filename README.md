@@ -6,7 +6,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A TypeScript library that provides persistent storage functionality for React Hook Form, allowing you to automatically save and restore form data using localStorage, sessionStorage, or custom storage implementations.
+Persist React Hook Form state to `localStorage`, `sessionStorage`, or any custom/async storage — TypeScript-first, SSR-safe, with field serializers and debounced auto-save.
 
 ## Table of Contents
 
@@ -16,6 +16,7 @@ A TypeScript library that provides persistent storage functionality for React Ho
 - [Configuration Options](#configuration-options)
 - [Advanced Usage](#advanced-usage)
 - [Examples](#examples)
+- [Migrating from react-hook-form-persist](#migrating-from-react-hook-form-persist)
 - [TypeScript Support](#typescript-support)
 - [Contributing](#contributing)
 - [License](#license)
@@ -104,9 +105,11 @@ The main hook that provides storage functionality for your React Hook Form.
 
 ```typescript
 {
-  isRestored: boolean;  // Indicates if data was restored from storage
-  isLoading: boolean;   // Indicates if restoration is in progress
-  save: () => void;     // Manual save function
+  isRestored: boolean;          // Indicates if data was restored from storage
+  isLoading: boolean;           // Indicates if restoration is in progress
+  save: () => Promise<void>;    // Manually save the current form values
+  clear: () => Promise<void>;   // Clear the stored data
+  restore: () => Promise<void>; // Manually restore stored values into the form
 }
 ```
 
@@ -116,7 +119,7 @@ The main hook that provides storage functionality for your React Hook Form.
 
 ```typescript
 interface UseFormStorageOptions<T extends FieldValues> {
-  storage?: Storage; // Storage implementation (default: localStorage)
+  storage?: Storage | UseFormStorageAdapter; // Storage implementation (default: localStorage)
   included?: Array<Path<T>>; // Fields to include in storage
   excluded?: Array<Path<T>>; // Fields to exclude from storage
   onRestore?: (data: Partial<T>) => void; // Callback when data is restored
@@ -135,9 +138,9 @@ interface UseFormStorageOptions<T extends FieldValues> {
 
 #### `storage`
 
-- **Type**: `Storage`
+- **Type**: `Storage | UseFormStorageAdapter`
 - **Default**: `localStorage`
-- **Description**: The storage implementation to use. Can be `localStorage`, `sessionStorage`, or a custom storage object that implements the `Storage` interface.
+- **Description**: The storage implementation to use. Can be `localStorage`, `sessionStorage`, or a custom (optionally async) storage object that implements `getItem`/`setItem`/`removeItem`. The default is resolved lazily, so the hook is safe to render on the server (see [Server-Side Rendering](#server-side-rendering)).
 
 ```typescript
 // Use sessionStorage instead of localStorage
@@ -231,12 +234,12 @@ useFormStorage('my-form', form, {
 #### `serializer`
 
 - **Type**: `Record<Path<T>, Serializer<T, Path<T>>>`
-- **Description**: Custom serialization/deserialization for specific fields.
+- **Description**: Custom serialization/deserialization for specific fields. Both directions are optional — if you omit `serialize` (or `deserialize`), that direction falls back to the identity transform and the field keeps its value.
 
 ```typescript
 interface Serializer<T, K extends Path<T>> {
-  serialize: (value: PathValue<T, K>) => any;
-  deserialize: (value: any) => PathValue<T, K>;
+  serialize?: (value: PathValue<T, K>) => any;
+  deserialize?: (value: any) => PathValue<T, K>;
 }
 
 // Example: Custom date serialization
@@ -497,6 +500,56 @@ export function CheckoutForm() {
 }
 ```
 
+## Migrating from react-hook-form-persist
+
+Coming from [`react-hook-form-persist`](https://github.com/tiaanduplessis/react-hook-form-persist)? The two libraries solve the same problem, so migrating is mostly a rename. The main structural difference is how the hook is called: `react-hook-form-persist` takes `watch` and `setValue` inside the options object, while `react-hook-form-storage` takes the whole `form` instance as its second argument.
+
+```tsx
+// Before — react-hook-form-persist
+import useFormPersist from 'react-hook-form-persist';
+
+const form = useForm();
+const { watch, setValue } = form;
+
+useFormPersist('my-form', {
+  watch,
+  setValue,
+  storage: window.localStorage,
+  exclude: ['password'],
+  onDataRestored: (data) => console.log(data),
+});
+
+// After — react-hook-form-storage
+import { useFormStorage } from 'react-hook-form-storage';
+
+const form = useForm();
+
+useFormStorage('my-form', form, {
+  storage: window.localStorage,
+  excluded: ['password'],
+  onRestore: (data) => console.log(data),
+});
+```
+
+### Option mapping
+
+| `react-hook-form-persist` | `react-hook-form-storage` | Notes |
+| --- | --- | --- |
+| `useFormPersist(key, { watch, setValue, ... })` | `useFormStorage(key, form, { ... })` | Pass the `form` instance; `watch`/`setValue` are no longer passed manually. |
+| `storage` (defaults to `sessionStorage`) | `storage` (defaults to `localStorage`) | ⚠️ The default storage differs — see the note below. |
+| `exclude` | `excluded` | |
+| `include` | `included` | |
+| `onDataRestored` | `onRestore` | |
+| `validate` | `validate` | |
+| `dirty` | `dirty` | |
+| `touch` | `touched` | |
+| `timeout` / `onTimeout` / `accessKey` | _no direct equivalent_ | There is no built-in expiry. Use a custom `storage` adapter if you need TTL semantics. |
+| _not available_ | `onSave`, `debounce`, `serializer`, `autoSave`, `autoRestore` | Extra capabilities offered by this library. |
+
+> **⚠️ Default storage changes.** `react-hook-form-persist` defaults to `sessionStorage`, while `react-hook-form-storage` defaults to `localStorage`. If you relied on the default, pass `storage: sessionStorage` explicitly to keep the same behavior.
+
+Both hooks return a `clear()` function to remove the persisted data. `react-hook-form-storage` additionally returns `isRestored`, `isLoading`, `save()` and `restore()` for finer control over the lifecycle (see [API Reference](#api-reference)).
+
 ## TypeScript Support
 
 This library is written in TypeScript and provides full type safety:
@@ -517,6 +570,10 @@ useFormStorage('user-form', form, {
   excluded: ['invalid'], // ❌ TypeScript error - 'invalid' doesn't exist
 });
 ```
+
+## Server-Side Rendering
+
+The hook is SSR-safe: the default `localStorage` is resolved lazily and only in the browser, so it can be rendered in Next.js (or any SSR framework) without guards. On the server, storage operations are no-ops and `isRestored` starts as `false`; restoration runs on the client after hydration.
 
 ## Browser Compatibility
 

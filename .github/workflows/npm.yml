@@ -1,0 +1,98 @@
+name: Publish to NPM
+
+# package.json is the source of truth: bump it in a PR, then dispatch. This
+# publishes the committed version and never bumps.
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # workflow_dispatch fires from any ref; without this it would publish that branch.
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+      - name: Read the version to publish
+        id: version
+        run: echo "value=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to republish an existing version
+        run: |
+          VERSION='${{ steps.version.outputs.value }}'
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "Tag v$VERSION already exists. Bump the version in package.json first."
+            exit 1
+          fi
+          if npm view "react-hook-form-storage@$VERSION" version >/dev/null 2>&1; then
+            echo "react-hook-form-storage@$VERSION is already on npm."
+            exit 1
+          fi
+
+      - name: Extract the release notes
+        # Before publishing: npm publish is irreversible, so everything that can
+        # refuse the release has to fail first.
+        run: |
+          VERSION='${{ steps.version.outputs.value }}'
+          awk -v v="## [$VERSION]" '$0==v{f=1;next} /^## \[/{f=0} f' \
+            CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "CHANGELOG.md has no '## [$VERSION]' section. Add one first."
+            exit 1
+          fi
+
+      - name: Publish to NPM
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Tag the published version
+        # After publish, so a failed release leaves no tag.
+        run: |
+          VERSION='${{ steps.version.outputs.value }}'
+          git tag -a "v$VERSION" -m "release: v$VERSION"
+          git push origin "v$VERSION"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION='${{ steps.version.outputs.value }}'
+          gh release create "v$VERSION" \
+            --verify-tag \
+            --title "v$VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md"

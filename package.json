@@ -1,7 +1,7 @@
 {
   "name": "react-hook-form-storage",
-  "version": "1.3.0",
-  "description": "A TypeScript library for React Hook Form persist functionality",
+  "version": "1.3.1",
+  "description": "Persist React Hook Form state to localStorage/sessionStorage/async storage — TypeScript-first, SSR-safe, with serializers & debounce.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
@@ -17,18 +17,25 @@
     "test": "jest",
     "test:watch": "jest --watchAll",
     "test:coverage": "jest --coverage",
-    "lint": "eslint src/**/*.{ts,tsx} --fix"
+    "lint": "eslint 'src/**/*.{ts,tsx}' --max-warnings=17",
+    "lint:fix": "eslint 'src/**/*.{ts,tsx}' --fix",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "react",
     "react-hook-form",
     "react-hook-forms",
+    "react-hook-form-persist",
     "form",
     "persist",
     "persistent",
     "persistent-storage",
     "localstorage",
-    "sessionstorage"
+    "sessionstorage",
+    "autosave",
+    "draft",
+    "ssr",
+    "nextjs"
   ],
   "author": "Franco Sánchez <francog.sanchez@hotmail.com>",
   "license": "MIT",
@@ -37,6 +44,7 @@
     "react-hook-form": ">=7.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@hookform/resolvers": "^5.2.1",
     "@rollup/plugin-commonjs": "^29.0.0",
     "@rollup/plugin-node-resolve": "^16.0.1",
@@ -51,6 +59,7 @@
     "eslint": "^9.32.0",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
+    "globals": "^17.6.0",
     "jest": "^30.0.5",
     "jest-environment-jsdom": "^30.0.5",
     "prettier": "^3.6.2",
