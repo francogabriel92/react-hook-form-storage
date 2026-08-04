@@ -1,16 +1,11 @@
 name: Publish to NPM
 
+# The version in package.json is the single source of truth: bump it in a normal
+# PR alongside its CHANGELOG entry, then dispatch this workflow. It publishes
+# exactly the committed version and tags it — it never bumps, so there is no way
+# for the published version to disagree with the committed one.
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version bump type'
-        required: true
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
 
 jobs:
   publish:
@@ -56,16 +51,30 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Bump version
-        # Block scalar on purpose: the commit message contains ': ', which YAML
-        # would otherwise read as a mapping key and refuse to parse.
-        run: |
-          npm version ${{ github.event.inputs.version }} -m "chore: bump version to %s"
+      - name: Read the version to publish
+        id: version
+        run: echo "value=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
 
-      - name: Push changes
-        run: git push --follow-tags
+      - name: Refuse to republish an existing version
+        run: |
+          VERSION='${{ steps.version.outputs.value }}'
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "Tag v$VERSION already exists. Bump the version in package.json first."
+            exit 1
+          fi
+          if npm view "react-hook-form-storage@$VERSION" version >/dev/null 2>&1; then
+            echo "react-hook-form-storage@$VERSION is already on npm."
+            exit 1
+          fi
 
       - name: Publish to NPM
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Tag the published version
+        # Only after a successful publish, so a failed release leaves no tag.
+        run: |
+          VERSION='${{ steps.version.outputs.value }}'
+          git tag -a "v$VERSION" -m "release: v$VERSION"
+          git push origin "v$VERSION"
