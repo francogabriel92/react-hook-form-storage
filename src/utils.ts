@@ -1,5 +1,5 @@
 import { FieldValues, Path } from 'react-hook-form';
-import { Serializer, UseFormStorageOptions } from './types';
+import { Serializer } from './types';
 
 /**
  * Filters the fields of an object based on included and excluded field lists.

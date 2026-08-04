@@ -1,7 +1,7 @@
 import { beforeEach, describe, it, expect, jest } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useForm } from 'react-hook-form';
-import { UseFormStorageAdapter, UseFormStorageOptions } from '../types';
+import { UseFormStorageOptions } from '../types';
 import { useFormStorage } from '../use-react-hook-form-storage';
 import { createMockRemoteStore } from './test-utils';
 

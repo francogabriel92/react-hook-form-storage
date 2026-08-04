@@ -3,10 +3,12 @@ import tseslint from '@typescript-eslint/eslint-plugin';
 import tsparser from '@typescript-eslint/parser';
 import react from 'eslint-plugin-react';
 import reactHooks from 'eslint-plugin-react-hooks';
-import browserGlobals from 'globals/lib/browser.js';
-import jestGlobals from 'globals/lib/jest.js';
+import globals from 'globals';
 
 export default [
+  {
+    ignores: ['dist/', 'node_modules/', 'coverage/', 'dev/', '*.config.js', '*.config.mjs'],
+  },
   {
     files: ['**/*.{js,jsx,ts,tsx}'],
     languageOptions: {
@@ -17,11 +19,10 @@ export default [
         ecmaFeatures: {
           jsx: true,
         },
-        project: './tsconfig.json',
       },
       globals: {
-        ...browserGlobals,
-        ...jestGlobals,
+        ...globals.browser,
+        ...globals.jest,
       },
     },
     plugins: {
@@ -39,15 +40,22 @@ export default [
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
       '@typescript-eslint/no-explicit-any': 'warn',
-      '@typescript-eslint/no-unused-vars': 'error',
+      // Allow `_`-prefixed names so intentional destructuring discards
+      // (e.g. `const { name: _name, ...rest } = values`) are not errors.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          ignoreRestSiblings: true,
+        },
+      ],
     },
     settings: {
       react: {
         version: 'detect',
       },
     },
-  },
-  {
-    ignores: ['dist/', 'node_modules/', '*.config.js'],
   },
 ];
