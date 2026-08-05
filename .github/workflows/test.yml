@@ -33,7 +33,7 @@ jobs:
         run: npm run build
 
       - name: Run tests
-        run: npm test -- --ci --coverage
+        run: npm test -- --ci --coverage --randomize
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

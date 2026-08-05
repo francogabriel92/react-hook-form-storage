@@ -45,7 +45,7 @@ jobs:
         run: npm run build
 
       - name: Run tests
-        run: npm test
+        run: npm test -- --ci --randomize
 
       - name: Read the version to publish
         id: version
