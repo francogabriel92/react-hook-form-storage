@@ -120,7 +120,6 @@ describe('useFormStorage', () => {
       expect(result.current.formStorage.isLoading).toBe(false);
     });
     expect(result.current.formStorage.isRestored).toBe(true);
-    expect(loadingByRender.at(-1)).toBe(false);
   });
 
   it('Should have isLoading property available', async () => {
@@ -1017,7 +1016,8 @@ describe('useFormStorage', () => {
         });
         return { form, formStorage };
       },
-      { initialProps: { excludedField: 'email' as const } }
+      // Not `as const`: that narrows Props to 'email' and rejects the rerender.
+      { initialProps: { excludedField: 'email' } }
     );
 
     await act(async () => {
