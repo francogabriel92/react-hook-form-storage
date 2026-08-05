@@ -158,14 +158,20 @@ export const useFormStorage = <T extends FieldValues>(
   // data that was just cleared.
   const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
   // Counted per key: a write for one key says nothing about whether a pending
-  // write for a different key is still wanted.
-  const latestWriteRef = useRef<Record<string, number>>({});
+  // write for a different key is still wanted. Prototype-less because the key
+  // comes from the caller: on a plain object, `rec['__proto__'] = n` is a no-op
+  // and the read returns Object.prototype, so that one key would never be seen
+  // as superseded.
+  const latestWriteRef = useRef<Record<string, number>>(Object.create(null));
 
   const enqueueWrite = useCallback(
     (
       writeKey: string,
       mutate: () => Promise<void>,
-      { supersedable } = { supersedable: true }
+      // Destructured per property, not on the whole object: with a default on
+      // the object, passing a partial one would leave supersedable undefined and
+      // silently invert this default.
+      { supersedable = true }: { supersedable?: boolean } = {}
     ) => {
       const writeId = (latestWriteRef.current[writeKey] ?? 0) + 1;
       latestWriteRef.current[writeKey] = writeId;

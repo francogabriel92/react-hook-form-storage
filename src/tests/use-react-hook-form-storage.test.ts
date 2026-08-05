@@ -849,6 +849,35 @@ describe('useFormStorage', () => {
     expect(JSON.parse(forB as string).name).toBe('FOR-B');
   });
 
+  it('Should supersede correctly for a key named __proto__', async () => {
+    // On a plain object the per-key counter silently breaks for this one key.
+    const mockStorage = createMockRemoteStore({
+      delayMs: 0,
+      saveDelaysMs: [60],
+    });
+
+    const { result } = renderHook(() => {
+      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+      const formStorage = useFormStorage('__proto__', form, {
+        storage: mockStorage,
+      });
+      return { form, formStorage };
+    });
+
+    act(() => {
+      result.current.form.setValue('name', 'ONE');
+      result.current.form.setValue('name', 'TWO');
+      result.current.form.setValue('name', 'THREE');
+    });
+
+    await waitFor(async () => {
+      const storedValue = await mockStorage.getItem('__proto__');
+      expect(JSON.parse(storedValue as string).name).toBe('THREE');
+    });
+
+    expect(mockStorage.writes).toHaveLength(1);
+  });
+
   it('Should handle errors when restored malformatted storage', async () => {
     // Mock console.error to suppress error logs in test output
     jest.spyOn(console, 'error').mockImplementation(() => {});

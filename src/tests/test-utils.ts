@@ -17,7 +17,9 @@ export const createMockRemoteStore = (options?: {
   /** Keys that actually reached removeItem, in completion order. */
   removes: string[];
 } => {
-  const memory: Record<string, string> = {};
+  // Prototype-less for the same reason the hook's counter is: a key of
+  // '__proto__' would otherwise read back Object.prototype instead of a value.
+  const memory: Record<string, string> = Object.create(null);
   const delay = options?.delayMs ?? 100;
   const writes: string[] = [];
   const removes: string[] = [];
