@@ -761,7 +761,7 @@ describe('useFormStorage', () => {
     // a stale VALUE is fine, silently dropping a delete is not.
     const mockStorage = createMockRemoteStore({
       delayMs: 0,
-      saveDelaysMs: [100, 0, 0],
+      saveDelaysMs: [100],
     });
 
     const { result } = renderHook(() => {
