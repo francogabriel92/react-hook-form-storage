@@ -1038,6 +1038,44 @@ describe('useFormStorage', () => {
     });
   });
 
+  it('Should report isLoading true during a manual restore', async () => {
+    // The second load is where restoreDataFromStorage's own setIsLoading(true)
+    // is load-bearing: the initial useState(autoRestore) cannot cover it,
+    // because isLoading has already settled to false by then.
+    const mockStorage = createMockRemoteStore({ delayMs: 60 });
+    await mockStorage.setItem(
+      STORAGE_TEST_KEY,
+      JSON.stringify(STORAGE_DEFAULT_VALUES)
+    );
+
+    const { result } = renderHook(() => {
+      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
+        storage: mockStorage,
+        autoRestore: false,
+      });
+      return { form, formStorage };
+    });
+
+    expect(result.current.formStorage.isLoading).toBe(false);
+
+    // Fired without awaiting: awaiting inside a single act() lets React collapse
+    // the true and the false into one render, hiding the loading state entirely.
+    let restorePromise: Promise<void>;
+    act(() => {
+      restorePromise = result.current.formStorage.restore();
+    });
+
+    expect(result.current.formStorage.isLoading).toBe(true);
+
+    await act(async () => {
+      await restorePromise;
+    });
+
+    expect(result.current.formStorage.isLoading).toBe(false);
+    expect(result.current.formStorage.isRestored).toBe(true);
+  });
+
   it('Should handle non autoRestore scenarios', async () => {
     localStorage.setItem(
       STORAGE_TEST_KEY,
