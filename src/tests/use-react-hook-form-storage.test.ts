@@ -586,8 +586,10 @@ describe('useFormStorage', () => {
       delayMs: 50,
     });
 
-    // Pre-populate mock storage with test data
-    mockStorage.setItem(
+    // Awaited: the adapter is async, and the restore effect runs once, so a read
+    // that lands before this write is a permanent failure that waitFor cannot
+    // recover from.
+    await mockStorage.setItem(
       STORAGE_TEST_KEY,
       JSON.stringify(STORAGE_DEFAULT_VALUES)
     );
