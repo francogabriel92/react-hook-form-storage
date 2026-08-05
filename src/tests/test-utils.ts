@@ -11,9 +11,13 @@ export const createMockRemoteStore = (options?: {
   shouldFailRestore?: boolean;
   shouldFailSave?: boolean;
   shouldFailClear?: boolean;
-}): UseFormStorageAdapter => {
+}): UseFormStorageAdapter & {
+  /** Values that actually reached setItem, in completion order. */
+  writes: string[];
+} => {
   const memory: Record<string, string> = {};
   const delay = options?.delayMs ?? 100;
+  const writes: string[] = [];
   let saveCall = 0;
 
   const simulateNetwork = async <T>(fn: () => T, ms = delay): Promise<T> => {
@@ -22,6 +26,8 @@ export const createMockRemoteStore = (options?: {
   };
 
   return {
+    writes,
+
     getItem: async (key) =>
       simulateNetwork(() => {
         if (options?.shouldFailRestore) {
@@ -39,6 +45,7 @@ export const createMockRemoteStore = (options?: {
           throw new Error('Simulated save failure');
         }
         memory[key] = value;
+        writes.push(value);
       }, saveDelay);
     },
 

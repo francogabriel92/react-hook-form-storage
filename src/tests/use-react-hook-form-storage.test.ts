@@ -635,8 +635,9 @@ describe('useFormStorage', () => {
   });
 
   it('Should not let a slow earlier write overwrite a faster later one', async () => {
-    // First write is slow, second is immediate: without ordering the second
-    // lands first and the first then overwrites it with stale values.
+    // The first write is slow and must already be IN FLIGHT before the second is
+    // issued, otherwise it is merely superseded and never reaches the adapter —
+    // which is what made the earlier version of this test vacuous.
     const mockStorage = createMockRemoteStore({
       delayMs: 0,
       saveDelaysMs: [80, 0],
@@ -646,21 +647,50 @@ describe('useFormStorage', () => {
 
     act(() => {
       setValue('name', 'FIRST');
+    });
+
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 10));
+    });
+
+    act(() => {
       setValue('name', 'SECOND');
+    });
+
+    await waitFor(() => {
+      expect(mockStorage.writes).toHaveLength(2);
+    });
+
+    // Both writes really happened, and the slower earlier one landed first
+    expect(JSON.parse(mockStorage.writes[0]).name).toBe('FIRST');
+    expect(JSON.parse(mockStorage.writes[1]).name).toBe('SECOND');
+
+    const finalValue = await mockStorage.getItem(STORAGE_TEST_KEY);
+    expect(JSON.parse(finalValue as string).name).toBe('SECOND');
+  });
+
+  it('Should skip writes that are superseded before they start', async () => {
+    const mockStorage = createMockRemoteStore({
+      delayMs: 0,
+      saveDelaysMs: [60, 0, 0],
+    });
+
+    const { setValue } = await renderFormHook({ storage: mockStorage });
+
+    // All three are issued synchronously, so the first two are superseded while
+    // still queued and must never reach the adapter.
+    act(() => {
+      setValue('name', 'ONE');
+      setValue('name', 'TWO');
+      setValue('name', 'THREE');
     });
 
     await waitFor(async () => {
       const storedValue = await mockStorage.getItem(STORAGE_TEST_KEY);
-      expect(JSON.parse(storedValue as string).name).toBe('SECOND');
+      expect(JSON.parse(storedValue as string).name).toBe('THREE');
     });
 
-    // Let the slow write settle: it must not clobber the newer value.
-    await act(async () => {
-      await new Promise((res) => setTimeout(res, 150));
-    });
-
-    const finalValue = await mockStorage.getItem(STORAGE_TEST_KEY);
-    expect(JSON.parse(finalValue as string).name).toBe('SECOND');
+    expect(mockStorage.writes).toHaveLength(1);
   });
 
   it('Should not let a pending save resurrect data after clear', async () => {
