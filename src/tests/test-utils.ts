@@ -14,10 +14,13 @@ export const createMockRemoteStore = (options?: {
 }): UseFormStorageAdapter & {
   /** Values that actually reached setItem, in completion order. */
   writes: string[];
+  /** Keys that actually reached removeItem, in completion order. */
+  removes: string[];
 } => {
   const memory: Record<string, string> = {};
   const delay = options?.delayMs ?? 100;
   const writes: string[] = [];
+  const removes: string[] = [];
   let saveCall = 0;
 
   const simulateNetwork = async <T>(fn: () => T, ms = delay): Promise<T> => {
@@ -27,6 +30,7 @@ export const createMockRemoteStore = (options?: {
 
   return {
     writes,
+    removes,
 
     getItem: async (key) =>
       simulateNetwork(() => {
@@ -55,6 +59,7 @@ export const createMockRemoteStore = (options?: {
           throw new Error('Simulated clear failure');
         }
         delete memory[key];
+        removes.push(key);
       }),
   };
 };

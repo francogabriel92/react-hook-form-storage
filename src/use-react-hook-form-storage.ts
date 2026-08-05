@@ -159,20 +159,25 @@ export const useFormStorage = <T extends FieldValues>(
   const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
   const latestWriteRef = useRef(0);
 
-  const enqueueWrite = useCallback((mutate: () => Promise<void>) => {
-    const writeId = ++latestWriteRef.current;
+  const enqueueWrite = useCallback(
+    (mutate: () => Promise<void>, { supersedable } = { supersedable: true }) => {
+      const writeId = ++latestWriteRef.current;
 
-    const run = async () => {
-      // Superseded while queued.
-      if (writeId < latestWriteRef.current) return;
-      await mutate();
-    };
+      const run = async () => {
+        // Only a save may be dropped when a newer one is already queued:
+        // coalescing away a stale value is safe, silently dropping a delete is
+        // not — the caller asked for it and would get a successful resolve.
+        if (supersedable && writeId < latestWriteRef.current) return;
+        await mutate();
+      };
 
-    // Both branches: a rejection must not stall every later write.
-    const next = writeChainRef.current.then(run, run);
-    writeChainRef.current = next;
-    return next;
-  }, []);
+      // Both branches: a rejection must not stall every later write.
+      const next = writeChainRef.current.then(run, run);
+      writeChainRef.current = next;
+      return next;
+    },
+    []
+  );
 
   const saveToStorage = useCallback(
     async (values: Record<string, any>) => {
@@ -288,10 +293,13 @@ export const useFormStorage = <T extends FieldValues>(
     isLoading,
     save: async () => saveToStorage(form.getValues()),
     clear: async () =>
-      enqueueWrite(async () => {
-        await storageAdapter.removeItem(key);
-        setIsRestored(false);
-      }),
+      enqueueWrite(
+        async () => {
+          await storageAdapter.removeItem(key);
+          setIsRestored(false);
+        },
+        { supersedable: false }
+      ),
     restore: async () => restoreDataFromStorage(),
   };
 };

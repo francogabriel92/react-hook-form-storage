@@ -757,6 +757,48 @@ describe('useFormStorage', () => {
     expect(result.current.formStorage.isRestored).toBe(false);
   });
 
+  it('Should still clear when a save is issued before clear gets its turn', async () => {
+    // A save queued after clear() must not make clear skippable: coalescing away
+    // a stale VALUE is fine, silently dropping a delete is not.
+    const mockStorage = createMockRemoteStore({
+      delayMs: 0,
+      saveDelaysMs: [100, 0, 0],
+    });
+
+    const { result } = renderHook(() => {
+      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
+        storage: mockStorage,
+      });
+      return { form, formStorage };
+    });
+
+    act(() => {
+      result.current.form.setValue('name', 'FIRST');
+    });
+
+    const clearPromise = result.current.formStorage.clear();
+
+    act(() => {
+      result.current.form.setValue('name', 'THIRD');
+    });
+
+    await act(async () => {
+      await clearPromise;
+    });
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 400));
+    });
+
+    // The delete must have actually reached the adapter
+    expect(mockStorage.removes).toEqual([STORAGE_TEST_KEY]);
+
+    // Re-persisting after the clear is correct: clear() does not reset the form,
+    // so a later edit is expected to be saved again.
+    const finalValue = await mockStorage.getItem(STORAGE_TEST_KEY);
+    expect(JSON.parse(finalValue as string).name).toBe('THIRD');
+  });
+
   it('Should handle errors when restored malformatted storage', async () => {
     // Mock console.error to suppress error logs in test output
     jest.spyOn(console, 'error').mockImplementation(() => {});
