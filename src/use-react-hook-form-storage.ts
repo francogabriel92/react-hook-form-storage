@@ -195,23 +195,33 @@ export const useFormStorage = <T extends FieldValues>(
   );
 
   const saveToStorage = useCallback(
-    async (values: Record<string, any>) => {
+    async (
+      values: Record<string, any>,
+      { supersedable = true }: { supersedable?: boolean } = {}
+    ) => {
       const { included, excluded, serializer, onSave } = optionsRef.current;
 
-      return enqueueWrite(key, async () => {
-        try {
-          const valuesToStore = filterIncludedOrExcludedFields(
-            values,
-            included,
-            excluded
-          );
-          const serialized = transformValues(valuesToStore, serializer as any);
-          await storageAdapter.setItem(key, JSON.stringify(serialized));
-          onSave?.(valuesToStore);
-        } catch (error) {
-          console.error(`[FORM-STORAGE] Failed to save data: ${error}`);
-        }
-      });
+      return enqueueWrite(
+        key,
+        async () => {
+          try {
+            const valuesToStore = filterIncludedOrExcludedFields(
+              values,
+              included,
+              excluded
+            );
+            const serialized = transformValues(
+              valuesToStore,
+              serializer as any
+            );
+            await storageAdapter.setItem(key, JSON.stringify(serialized));
+            onSave?.(valuesToStore);
+          } catch (error) {
+            console.error(`[FORM-STORAGE] Failed to save data: ${error}`);
+          }
+        },
+        { supersedable }
+      );
     },
     [key, storageAdapter, enqueueWrite]
   );
@@ -313,7 +323,10 @@ export const useFormStorage = <T extends FieldValues>(
   return {
     isRestored,
     isLoading,
-    save: async () => saveToStorage(form.getValues()),
+    // Not supersedable: autosave may coalesce, but a caller who awaits save()
+    // and gets a resolve must have had their write and their onSave happen.
+    save: async () =>
+      saveToStorage(form.getValues(), { supersedable: false }),
     clear: async () => {
       cancelDebouncedSaveRef.current?.();
       return enqueueWrite(

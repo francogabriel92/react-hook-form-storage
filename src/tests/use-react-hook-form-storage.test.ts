@@ -907,6 +907,35 @@ describe('useFormStorage', () => {
     expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
   });
 
+  it('Should run every explicit save() and fire onSave for each', async () => {
+    // Autosave may coalesce, but a caller who awaited save() and got a resolve
+    // must not have had the write and its onSave silently dropped.
+    const onSaveMock = jest.fn();
+    const mockStorage = createMockRemoteStore({
+      delayMs: 0,
+      saveDelaysMs: [80, 0],
+    });
+
+    const { result } = renderHook(() => {
+      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
+        storage: mockStorage,
+        autoSave: false,
+        onSave: onSaveMock,
+      });
+      return { form, formStorage };
+    });
+
+    await act(async () => {
+      const first = result.current.formStorage.save();
+      const second = result.current.formStorage.save();
+      await Promise.all([first, second]);
+    });
+
+    expect(mockStorage.writes).toHaveLength(2);
+    expect(onSaveMock).toHaveBeenCalledTimes(2);
+  });
+
   it('Should handle errors when restored malformatted storage', async () => {
     // Mock console.error to suppress error logs in test output
     jest.spyOn(console, 'error').mockImplementation(() => {});
