@@ -157,17 +157,26 @@ export const useFormStorage = <T extends FieldValues>(
   // through here too, or a pending save lands afterwards and resurrects the
   // data that was just cleared.
   const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
-  const latestWriteRef = useRef(0);
+  // Counted per key: a write for one key says nothing about whether a pending
+  // write for a different key is still wanted.
+  const latestWriteRef = useRef<Record<string, number>>({});
 
   const enqueueWrite = useCallback(
-    (mutate: () => Promise<void>, { supersedable } = { supersedable: true }) => {
-      const writeId = ++latestWriteRef.current;
+    (
+      writeKey: string,
+      mutate: () => Promise<void>,
+      { supersedable } = { supersedable: true }
+    ) => {
+      const writeId = (latestWriteRef.current[writeKey] ?? 0) + 1;
+      latestWriteRef.current[writeKey] = writeId;
 
       const run = async () => {
         // Only a save may be dropped when a newer one is already queued:
         // coalescing away a stale value is safe, silently dropping a delete is
         // not — the caller asked for it and would get a successful resolve.
-        if (supersedable && writeId < latestWriteRef.current) return;
+        if (supersedable && writeId < (latestWriteRef.current[writeKey] ?? 0)) {
+          return;
+        }
         await mutate();
       };
 
@@ -183,7 +192,7 @@ export const useFormStorage = <T extends FieldValues>(
     async (values: Record<string, any>) => {
       const { included, excluded, serializer, onSave } = optionsRef.current;
 
-      return enqueueWrite(async () => {
+      return enqueueWrite(key, async () => {
         try {
           const valuesToStore = filterIncludedOrExcludedFields(
             values,
@@ -294,6 +303,7 @@ export const useFormStorage = <T extends FieldValues>(
     save: async () => saveToStorage(form.getValues()),
     clear: async () =>
       enqueueWrite(
+        key,
         async () => {
           await storageAdapter.removeItem(key);
           setIsRestored(false);

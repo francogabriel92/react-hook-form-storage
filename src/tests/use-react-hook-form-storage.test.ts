@@ -799,6 +799,57 @@ describe('useFormStorage', () => {
     expect(JSON.parse(finalValue as string).name).toBe('THIRD');
   });
 
+  it('Should not let a write for a new key supersede one for the old key', async () => {
+    // Supersede is per key: a save for keyB says nothing about whether keyA's
+    // pending save is still wanted, and dropping it loses the old key's data.
+    const mockStorage = createMockRemoteStore({
+      delayMs: 0,
+      saveDelaysMs: [100, 0, 0],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ storageKey }: { storageKey: string }) => {
+        const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+        const formStorage = useFormStorage(storageKey, form, {
+          storage: mockStorage,
+        });
+        return { form, formStorage };
+      },
+      { initialProps: { storageKey: 'keyA' } }
+    );
+
+    // The first save must get IN FLIGHT (a sleep, not just another act) so the
+    // second one is still QUEUED — the only state a later write can supersede.
+    act(() => {
+      result.current.form.setValue('name', 'A-OLD');
+    });
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 10));
+    });
+    act(() => {
+      result.current.form.setValue('name', 'A-LATEST');
+    });
+
+    await act(async () => {
+      rerender({ storageKey: 'keyB' });
+    });
+
+    act(() => {
+      result.current.form.setValue('name', 'FOR-B');
+    });
+
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 400));
+    });
+
+    const forA = await mockStorage.getItem('keyA');
+    const forB = await mockStorage.getItem('keyB');
+    // keyA must end on its own latest value, not be frozen at the older one
+    // because a keyB write happened to be enqueued later.
+    expect(JSON.parse(forA as string).name).toBe('A-LATEST');
+    expect(JSON.parse(forB as string).name).toBe('FOR-B');
+  });
+
   it('Should handle errors when restored malformatted storage', async () => {
     // Mock console.error to suppress error logs in test output
     jest.spyOn(console, 'error').mockImplementation(() => {});
