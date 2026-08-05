@@ -285,6 +285,10 @@ export const useFormStorage = <T extends FieldValues>(
     saveToStorageRef.current = saveToStorage;
   }, [saveToStorage]);
 
+  // Reachable from clear(): a save scheduled before the clear would otherwise
+  // fire afterwards and rewrite the data the caller just deleted.
+  const cancelDebouncedSaveRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     if (!autoSave) return;
 
@@ -295,11 +299,14 @@ export const useFormStorage = <T extends FieldValues>(
       ? debouncer(handleChange, debounce)
       : null;
 
+    cancelDebouncedSaveRef.current = debouncedHandleChange?.cancel ?? null;
+
     const subscription = watch(debouncedHandleChange ?? handleChange);
 
     return () => {
       subscription.unsubscribe();
       debouncedHandleChange?.cancel();
+      cancelDebouncedSaveRef.current = null;
     };
   }, [watch, debounce, autoSave]);
 
@@ -307,15 +314,17 @@ export const useFormStorage = <T extends FieldValues>(
     isRestored,
     isLoading,
     save: async () => saveToStorage(form.getValues()),
-    clear: async () =>
-      enqueueWrite(
+    clear: async () => {
+      cancelDebouncedSaveRef.current?.();
+      return enqueueWrite(
         key,
         async () => {
           await storageAdapter.removeItem(key);
           setIsRestored(false);
         },
         { supersedable: false }
-      ),
+      );
+    },
     restore: async () => restoreDataFromStorage(),
   };
 };

@@ -878,6 +878,35 @@ describe('useFormStorage', () => {
     expect(mockStorage.writes).toHaveLength(1);
   });
 
+  it('Should not let a debounced save resurrect data after clear', async () => {
+    // The user types, hits clear, and touches nothing else. A save scheduled
+    // before the clear must not fire afterwards and bring the draft back.
+    const { result } = renderHook(() => {
+      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
+        debounce: 200,
+      });
+      return { form, formStorage };
+    });
+
+    act(() => {
+      result.current.form.setValue('name', 'PRE-CLEAR-EDIT');
+    });
+
+    await act(async () => {
+      await result.current.formStorage.clear();
+    });
+
+    expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
+
+    // Well past the debounce window, with no further edit
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 400));
+    });
+
+    expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
+  });
+
   it('Should handle errors when restored malformatted storage', async () => {
     // Mock console.error to suppress error logs in test output
     jest.spyOn(console, 'error').mockImplementation(() => {});
