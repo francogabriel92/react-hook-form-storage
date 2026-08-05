@@ -652,8 +652,8 @@ describe('useFormStorage', () => {
     expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
 
     // Clear the value and check if mockStorage is cleared
-    act(() => {
-      formStorage.clear();
+    await act(async () => {
+      await formStorage.clear();
     });
 
     await waitFor(async () => {
@@ -700,7 +700,7 @@ describe('useFormStorage', () => {
   it('Should skip writes that are superseded before they start', async () => {
     const mockStorage = createMockRemoteStore({
       delayMs: 0,
-      saveDelaysMs: [60, 0, 0],
+      saveDelaysMs: [60],
     });
 
     const { setValue } = await renderFormHook({ storage: mockStorage });
@@ -904,8 +904,8 @@ describe('useFormStorage', () => {
       storage: mockStorage,
     });
 
-    act(() => {
-      formStorage.clear();
+    await act(async () => {
+      await formStorage.clear();
     });
 
     // Assert that the error is logged
