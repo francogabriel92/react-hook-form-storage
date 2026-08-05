@@ -241,8 +241,8 @@ describe('useFormStorage', () => {
 
     const { formStorage } = await renderFormHook();
 
-    act(() => {
-      formStorage.clear();
+    await act(async () => {
+      await formStorage.clear();
     });
 
     expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
@@ -659,6 +659,41 @@ describe('useFormStorage', () => {
 
     const finalValue = await mockStorage.getItem(STORAGE_TEST_KEY);
     expect(JSON.parse(finalValue as string).name).toBe('SECOND');
+  });
+
+  it('Should not let a pending save resurrect data after clear', async () => {
+    // The save is still in flight when clear() runs, so if clear bypasses the
+    // write ordering the save lands afterwards and the cleared draft comes back.
+    const mockStorage = createMockRemoteStore({
+      delayMs: 0,
+      saveDelaysMs: [120],
+    });
+
+    const { result } = renderHook(() => {
+      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
+        storage: mockStorage,
+      });
+      return { form, formStorage };
+    });
+
+    act(() => {
+      result.current.form.setValue('name', TEST_NAME);
+    });
+
+    await act(async () => {
+      await result.current.formStorage.clear();
+    });
+
+    expect(await mockStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
+
+    // Give the slow save every chance to land after clear() resolved
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 300));
+    });
+
+    expect(await mockStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
+    expect(result.current.formStorage.isRestored).toBe(false);
   });
 
   it('Should handle errors when restored malformatted storage', async () => {

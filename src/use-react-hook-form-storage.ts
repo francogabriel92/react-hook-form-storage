@@ -152,20 +152,33 @@ export const useFormStorage = <T extends FieldValues>(
     return { setItem, getItem, removeItem };
   }, [storage]);
 
-  // Chained so writes reach an async adapter in issue order: otherwise a slow
-  // earlier write can resolve last and overwrite fresher values.
+  // Chained so mutations reach an async adapter in issue order: otherwise a slow
+  // earlier one can resolve last and undo a newer one. Clearing has to go
+  // through here too, or a pending save lands afterwards and resurrects the
+  // data that was just cleared.
   const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
   const latestWriteRef = useRef(0);
+
+  const enqueueWrite = useCallback((mutate: () => Promise<void>) => {
+    const writeId = ++latestWriteRef.current;
+
+    const run = async () => {
+      // Superseded while queued.
+      if (writeId < latestWriteRef.current) return;
+      await mutate();
+    };
+
+    // Both branches: a rejection must not stall every later write.
+    const next = writeChainRef.current.then(run, run);
+    writeChainRef.current = next;
+    return next;
+  }, []);
 
   const saveToStorage = useCallback(
     async (values: Record<string, any>) => {
       const { included, excluded, serializer, onSave } = optionsRef.current;
-      const writeId = ++latestWriteRef.current;
 
-      const write = async () => {
-        // Superseded while queued.
-        if (writeId < latestWriteRef.current) return;
-
+      return enqueueWrite(async () => {
         try {
           const valuesToStore = filterIncludedOrExcludedFields(
             values,
@@ -178,14 +191,9 @@ export const useFormStorage = <T extends FieldValues>(
         } catch (error) {
           console.error(`[FORM-STORAGE] Failed to save data: ${error}`);
         }
-      };
-
-      // Both branches: a rejection must not stall every later write.
-      const next = writeChainRef.current.then(write, write);
-      writeChainRef.current = next;
-      return next;
+      });
     },
-    [key, storageAdapter]
+    [key, storageAdapter, enqueueWrite]
   );
 
   const restoreDataFromStorage = useCallback(async () => {
@@ -279,10 +287,11 @@ export const useFormStorage = <T extends FieldValues>(
     isRestored,
     isLoading,
     save: async () => saveToStorage(form.getValues()),
-    clear: async () => {
-      await storageAdapter.removeItem(key);
-      setIsRestored(false);
-    },
+    clear: async () =>
+      enqueueWrite(async () => {
+        await storageAdapter.removeItem(key);
+        setIsRestored(false);
+      }),
     restore: async () => restoreDataFromStorage(),
   };
 };
