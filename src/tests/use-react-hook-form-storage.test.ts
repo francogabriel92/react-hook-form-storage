@@ -94,6 +94,35 @@ describe('useFormStorage', () => {
     expect(formStorage.isRestored).toBe(false);
   });
 
+  it('Should report isLoading true from the very first render until restored', async () => {
+    const mockStorage = createMockRemoteStore({ delayMs: 60 });
+    await mockStorage.setItem(
+      STORAGE_TEST_KEY,
+      JSON.stringify(STORAGE_DEFAULT_VALUES)
+    );
+
+    // Captured per render: the README's documented spinner renders BEFORE any
+    // effect runs, so asserting after the fact would miss a wrong initial value.
+    const loadingByRender: boolean[] = [];
+
+    const { result } = renderHook(() => {
+      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
+        storage: mockStorage,
+      });
+      loadingByRender.push(formStorage.isLoading);
+      return { form, formStorage };
+    });
+
+    expect(loadingByRender[0]).toBe(true);
+
+    await waitFor(() => {
+      expect(result.current.formStorage.isLoading).toBe(false);
+    });
+    expect(result.current.formStorage.isRestored).toBe(true);
+    expect(loadingByRender.at(-1)).toBe(false);
+  });
+
   it('Should have isLoading property available', async () => {
     const { formStorage } = await renderFormHook();
 
