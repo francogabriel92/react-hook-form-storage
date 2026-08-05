@@ -13,15 +13,24 @@ green in the first place. No API changes.
 
 ### Fixed
 
+- **A debounced save could resurrect data after `clear()`.** With `debounce`
+  set, typing started a timer; calling `clear()` before it fired emptied storage
+  and resolved, and then the timer wrote the draft back — with no user action
+  after the clear. `clear()` now cancels any pending debounced save.
 - **`clear()` could silently do nothing.** Routing `clear()` through 1.3.1's
   write chain made it share the "only the newest queued write runs" rule, so a
   save issued after `clear()` but before its turn caused the delete to be skipped
   — while `await clear()` still resolved successfully. Coalescing away a stale
   value is safe; dropping a delete is not, and `clear()` is no longer skippable.
+- **An explicit `save()` could be dropped.** Two concurrent `save()` calls
+  coalesced into one: the first never wrote and its `onSave` never fired, yet it
+  resolved without error. Autosave still coalesces — that is the point of it —
+  but the public `save()` no longer does.
 - **A write for one storage key could discard a pending write for another.** The
   supersede counter was global to the hook, so changing `key` while a save was
   queued for the previous key silently dropped it, leaving that key frozen on an
-  older value. Counting is now per key.
+  older value. Counting is now per key, and prototype-less so that a key named
+  `__proto__` cannot defeat it.
 
 ### Internal
 
