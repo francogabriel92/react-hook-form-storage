@@ -46,6 +46,10 @@ widened to the whole parent object.
   the cases where the leaf genuinely cannot be reached.
 - The nested-path warning is gone; the only remaining warning covers paths that
   would reach into an object's prototype.
+- Only own properties count as fields, and an array's fields are its indices.
+  `'card.toString'` resolves to nothing instead of persisting an inherited
+  member, and `'contacts.length'` to nothing instead of `delete arr.length`,
+  which throws and would have failed the whole save.
 
 ### Internal
 

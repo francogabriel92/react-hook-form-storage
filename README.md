@@ -200,6 +200,8 @@ An excluded path fails closed: if it cannot be resolved against the current valu
 
 Restoring writes the deepest stored paths, not the parent objects, so fields you kept out of storage keep their default values instead of being wiped.
 
+Arrays are the exception: they are restored whole, because restoring them index by index could never shrink a list. So a path filtered out from inside an array item — `excluded: ['contacts.0.email']` — comes back `undefined` on restore rather than falling back to its default value.
+
 #### `onRestore` / `onSave`
 
 - **Type**: `(data: Partial<T>) => void`
