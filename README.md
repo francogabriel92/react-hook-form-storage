@@ -172,7 +172,7 @@ useFormStorage('my-form', form, {
 #### `included` / `excluded`
 
 - **Type**: `Array<Path<T>>`
-- **Description**: Control which fields are stored. Use `included` to specify only certain fields, or `excluded` to omit specific fields.
+- **Description**: Control which fields are stored. Use `included` to specify only certain fields, or `excluded` to omit specific fields. Nested paths and array indices are matched field by field, so their siblings are unaffected. Both `'card.cvv'` and `'contacts[0].email'` notations work.
 
 ```typescript
 // Only store username and email
@@ -184,7 +184,21 @@ useFormStorage('my-form', form, {
 useFormStorage('my-form', form, {
   excluded: ['password'],
 });
+
+// Store the whole card except its CVV — `card.number` is still persisted
+useFormStorage('my-form', form, {
+  excluded: ['card.cvv'],
+});
+
+// Store a single nested field, and one field of an array item
+useFormStorage('my-form', form, {
+  included: ['card.number', 'contacts.0.email'],
+});
 ```
+
+An excluded path fails closed: if it cannot be resolved against the current values (for example `'card.cvv'` when `card` holds a string), the whole parent is dropped rather than persisted. An included path that cannot be resolved is simply skipped, so it never persists more than you asked for.
+
+Restoring writes the deepest stored paths, not the parent objects, so fields you kept out of storage keep their default values instead of being wiped.
 
 #### `onRestore` / `onSave`
 
@@ -234,12 +248,12 @@ useFormStorage('my-form', form, {
 #### `serializer`
 
 - **Type**: `Record<Path<T>, Serializer<T, Path<T>>>`
-- **Description**: Custom serialization/deserialization for specific fields. Both directions are optional — if you omit `serialize` (or `deserialize`), that direction falls back to the identity transform and the field keeps its value.
+- **Description**: Custom serialization/deserialization for specific fields, keyed by field path. Both directions are optional — if you omit `serialize` (or `deserialize`), that direction falls back to the identity transform and the field keeps its value. A serializer that throws is contained to its own field, which keeps its raw value.
 
 ```typescript
 interface Serializer<T, K extends Path<T>> {
-  serialize?: (value: PathValue<T, K>) => any;
-  deserialize?: (value: any) => PathValue<T, K>;
+  serialize?: (value: FieldPathValue<T, K>) => any;
+  deserialize?: (value: any) => FieldPathValue<T, K>;
 }
 
 // Example: Custom date serialization
@@ -248,6 +262,22 @@ useFormStorage('my-form', form, {
     birthDate: {
       serialize: (date: Date) => date.toISOString(),
       deserialize: (dateString: string) => new Date(dateString),
+    },
+  },
+});
+```
+
+Nested paths and array indices are supported, and the value type is inferred from the path:
+
+```typescript
+useFormStorage('my-form', form, {
+  serializer: {
+    'card.expiry': {
+      serialize: (date: Date) => date.toISOString(),
+      deserialize: (dateString: string) => new Date(dateString),
+    },
+    'contacts.0.email': {
+      serialize: (email: string) => email.toLowerCase(),
     },
   },
 });
