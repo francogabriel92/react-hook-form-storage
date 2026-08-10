@@ -535,6 +535,44 @@ describe('useFormStorage', () => {
     expect(getValues('nested.field2')).toBe(FORM_DEFAULT_VALUES.nested.field2);
   });
 
+  it('Should keep the defaults of an object whose every field is excluded', async () => {
+    const { formStorage, getValues, setValue } = await renderFormHook({
+      excluded: ['nested.field1', 'nested.field2'],
+    });
+
+    act(() => {
+      setValue('name', TEST_NAME);
+    });
+
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_TEST_KEY)).not.toBeNull();
+    });
+
+    await act(async () => {
+      await formStorage.restore();
+    });
+
+    // The parent survives as an empty husk in storage; restoring it must not
+    // clear the fields that were deliberately kept out
+    expect(getValues('nested')).toEqual(FORM_DEFAULT_VALUES.nested);
+  });
+
+  it('Should restore a record without turning its keys into array indices', async () => {
+    localStorage.setItem(
+      STORAGE_TEST_KEY,
+      JSON.stringify({ nested: { '1': 'one', 'a.b': 'dotted' } })
+    );
+
+    const { getValues } = await renderFormHook();
+
+    // Written as a path string, react-hook-form would re-parse '1' into an
+    // array index and 'a.b' into nesting
+    const nested = getValues('nested') as unknown as Record<string, unknown>;
+    expect(Array.isArray(nested)).toBe(false);
+    expect(nested['1']).toBe('one');
+    expect(nested['a.b']).toBe('dotted');
+  });
+
   it('Should apply a nested serializer in both directions', async () => {
     const { setValue } = await renderFormHook({
       included: ['nested'],

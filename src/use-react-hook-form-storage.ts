@@ -4,7 +4,8 @@ import {
   debouncer,
   filterIncludedOrExcludedFields,
   findUnsafePaths,
-  toLeafEntries,
+  isUnsafeKey,
+  mergeRestoredValues,
   transformValues,
 } from './utils';
 import { UseFormStorageOptions } from './types';
@@ -71,7 +72,7 @@ export const useFormStorage = <T extends FieldValues>(
   const [isRestored, setIsRestored] = useState(false);
   const [isLoading, setIsLoading] = useState(autoRestore);
 
-  const { setValue, watch } = form;
+  const { setValue, watch, getValues } = form;
 
   // Read through a ref, not deps: these are passed as inline literals, so
   // depending on them would recreate the callbacks and subscription every render.
@@ -216,12 +217,24 @@ export const useFormStorage = <T extends FieldValues>(
           true
         );
 
-        toLeafEntries(deserializedValues).forEach(([field, value]) => {
-          setValue(field as Path<T>, value, {
-            shouldDirty: dirty,
-            shouldTouch: touched,
-            shouldValidate: validate,
-          });
+        // Read once: setValue below changes what a later getValues() would
+        // return, and every field merges against the state before the restore.
+        const currentValues = getValues();
+
+        Object.entries(deserializedValues).forEach(([field, value]) => {
+          // JSON.parse keeps a '__proto__' key as an own property, and setting
+          // it would reassign the prototype of the form values object.
+          if (isUnsafeKey(field)) return;
+
+          setValue(
+            field as Path<T>,
+            mergeRestoredValues(currentValues[field], value),
+            {
+              shouldDirty: dirty,
+              shouldTouch: touched,
+              shouldValidate: validate,
+            }
+          );
         });
         setIsRestored(true);
         onRestore?.(valuesToRestore);
@@ -236,7 +249,7 @@ export const useFormStorage = <T extends FieldValues>(
     } finally {
       setIsLoading(false);
     }
-  }, [key, storageAdapter, setValue]);
+  }, [key, storageAdapter, setValue, getValues]);
 
   useEffect(() => {
     if (autoRestore) {

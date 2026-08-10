@@ -7,7 +7,7 @@ import {
   hasAtPath,
   isUnsafeKey,
   setAtPath,
-  toLeafEntries,
+  mergeRestoredValues,
   toPathSegments,
   transformValues,
 } from '../utils';
@@ -105,6 +105,23 @@ describe('setAtPath', () => {
     expect(result.items[0].email).toBe('a@b.c');
   });
 
+  it('Should follow the source shape rather than the segment', () => {
+    // A record keyed by digits must not be rebuilt as an array: '01' would
+    // become a named property that JSON.stringify never emits
+    const source = { byId: { '0': 'a', '01': 'b' } };
+
+    const result = setAtPath({}, ['byId', '01'], 'b', source);
+
+    expect(Array.isArray(result.byId)).toBe(false);
+    expect(JSON.stringify(result)).toBe('{"byId":{"01":"b"}}');
+  });
+
+  it('Should still build an array when the source has no counterpart', () => {
+    const result = setAtPath({}, ['items', '0'], 'x', { other: true });
+
+    expect(Array.isArray(result.items)).toBe(true);
+  });
+
   it('Should replace a non-container standing in the way', () => {
     expect(setAtPath({ card: 'oops' }, ['card', 'cvv'], '9')).toEqual({
       card: { cvv: '9' },
@@ -161,36 +178,71 @@ describe('deleteAtPath', () => {
   });
 });
 
-describe('toLeafEntries', () => {
-  it('Should flatten plain objects to their deepest paths', () => {
-    expect(toLeafEntries({ card: { number: '1', cvv: '2' }, name: 'Ada' }))
-      .toEqual([
-        ['card.number', '1'],
-        ['card.cvv', '2'],
-        ['name', 'Ada'],
-      ]);
+describe('mergeRestoredValues', () => {
+  it('Should keep current fields that storage does not carry', () => {
+    expect(
+      mergeRestoredValues(
+        { number: '4111', cvv: '123' },
+        { number: '9999' }
+      )
+    ).toEqual({ number: '9999', cvv: '123' });
   });
 
-  it('Should keep arrays, class instances and empty objects whole', () => {
+  it('Should change nothing when the stored object is empty', () => {
+    // The parent had every one of its keys filtered out; its defaults stand
+    expect(mergeRestoredValues({ number: '4111', cvv: '123' }, {})).toEqual({
+      number: '4111',
+      cvv: '123',
+    });
+  });
+
+  it('Should merge nested plain objects', () => {
+    expect(
+      mergeRestoredValues(
+        { a: { b: 1, c: 2 }, keep: true },
+        { a: { b: 9 } }
+      )
+    ).toEqual({ a: { b: 9, c: 2 }, keep: true });
+  });
+
+  it('Should replace arrays and class instances rather than merge them', () => {
     class Money {
       constructor(public amount = 1) {}
     }
-    const price = new Money();
+    const stored = new Money(5);
 
-    expect(
-      toLeafEntries({ items: [1, 2], price, empty: {}, missing: null })
-    ).toEqual([
-      ['items', [1, 2]],
-      ['price', price],
-      ['empty', {}],
-      ['missing', null],
-    ]);
+    expect(mergeRestoredValues([1, 2, 3], [9])).toEqual([9]);
+    expect(mergeRestoredValues({ a: 1 }, stored)).toBe(stored);
   });
 
-  it('Should drop keys that would touch the prototype', () => {
+  it('Should replace when the stored value is not an object', () => {
+    expect(mergeRestoredValues({ a: 1 }, null)).toBeNull();
+    expect(mergeRestoredValues({ a: 1 }, 'text')).toBe('text');
+  });
+
+  it('Should not mutate the current values', () => {
+    const current = { card: { number: '4111', cvv: '123' } };
+
+    mergeRestoredValues(current, { card: { number: '9999' } });
+
+    expect(current.card.number).toBe('4111');
+  });
+
+  it('Should drop stored keys that would touch the prototype', () => {
     const parsed = JSON.parse('{"name":"Ada","__proto__":{"polluted":true}}');
 
-    expect(toLeafEntries(parsed)).toEqual([['name', 'Ada']]);
+    const merged = mergeRestoredValues({ name: '' }, parsed);
+
+    expect(merged).toEqual({ name: 'Ada' });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it('Should keep a record key that is not path-safe intact', () => {
+    // Written through a path string, react-hook-form would re-parse these into
+    // an array index and a nested object
+    expect(
+      mergeRestoredValues({}, { '1': 'a', 'x.y': 'b' })
+    ).toEqual({ '1': 'a', 'x.y': 'b' });
   });
 });
 
@@ -206,6 +258,20 @@ describe('filterIncludedOrExcludedFields', () => {
 
     expect(result).toEqual(values);
     expect(result).not.toBe(values);
+  });
+
+  it('Should keep a record keyed by digits an object', () => {
+    const record = { byId: { '0': 10, '01': 20, '10023': 30 } };
+
+    const result = filterIncludedOrExcludedFields(record, [
+      'byId.0',
+      'byId.01',
+      'byId.10023',
+    ]);
+
+    // As an array, '01' would vanish and index 10023 would cost 50 KB of nulls
+    expect(JSON.parse(JSON.stringify(result))).toEqual(record);
+    expect(JSON.stringify(result).length).toBeLessThan(100);
   });
 
   it('Should include nested paths without their siblings', () => {

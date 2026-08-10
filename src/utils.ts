@@ -20,10 +20,15 @@ const hasField = (container: FieldValues, segment: string): boolean => {
 const cloneContainer = (value: FieldValues): FieldValues =>
   Array.isArray(value) ? [...value] : { ...value };
 
-// A numeric segment addresses an array index, so a container created for it has
-// to be an array — otherwise `items.0` would rebuild `items` as `{ '0': ... }`.
-const containerFor = (segment: string): FieldValues =>
-  /^\d+$/.test(segment) ? [] : {};
+// Mirror the container the value actually came from. Guessing from the segment
+// alone rebuilds a record keyed by digits — `{ '0': x }`, or worse `{ '01': x }`,
+// whose value an array drops entirely — as an array. The guess is only a last
+// resort, for a path with no counterpart in the source.
+const containerFor = (segment: string, shape?: unknown): FieldValues => {
+  if (Array.isArray(shape)) return [];
+  if (isContainer(shape)) return {};
+  return /^\d+$/.test(segment) ? [] : {};
+};
 
 /**
  * Splits a field path into segments. Both react-hook-form notations are
@@ -99,21 +104,29 @@ export const getAtPath = (source: unknown, segments: string[]): unknown =>
  * @param target The object to write into.
  * @param segments The path segments to follow.
  * @param value The value to write.
+ * @param shape The source the value came from, so containers created along the
+ * way keep its object-or-array shape.
  * @returns A new object with the value set.
  */
 export const setAtPath = (
   target: unknown,
   segments: string[],
-  value: unknown
+  value: unknown,
+  shape?: unknown
 ): any => {
   if (segments.length === 0) return value;
 
   const [segment, ...rest] = segments;
   const container = isContainer(target)
     ? cloneContainer(target)
-    : containerFor(segment);
+    : containerFor(segment, shape);
 
-  container[segment] = setAtPath(container[segment], rest, value);
+  container[segment] = setAtPath(
+    container[segment],
+    rest,
+    value,
+    isContainer(shape) ? shape[segment] : undefined
+  );
 
   return container;
 };
@@ -162,33 +175,34 @@ const isPlainObject = (value: unknown): value is FieldValues => {
 };
 
 /**
- * Flattens an object into [path, value] entries, descending only through
- * non-empty plain objects. Restoring has to write the deepest paths rather than
- * the top-level ones: react-hook-form's setValue replaces an object outright, so
- * writing a partially persisted parent would wipe the fields that were filtered
- * out — including their default values. Arrays and class instances stay whole,
- * where replacing is what the caller wants.
- * @param values The object to flatten.
- * @param prefix The path prefix, used by the recursion.
- * @returns The [path, value] pairs to write.
+ * Merges stored values over the current ones, descending only through plain
+ * objects. Restoring needs this because `setValue` replaces an object outright:
+ * writing back a parent that was filtered down to one field would wipe its
+ * siblings, default values included.
+ *
+ * Merging rather than writing each leaf under its own path is deliberate. A
+ * deep path reaches react-hook-form as a string, which it re-parses — turning a
+ * record key of '1' into an array index and one of 'a.b' into nesting — and it
+ * moves validation and dirty tracking down to the leaves. Arrays and class
+ * instances replace rather than merge, so a list can still shrink.
+ * @param current The value currently held by the form.
+ * @param stored The value read back from storage.
+ * @returns The value to write, with anything absent from storage preserved.
  */
-export const toLeafEntries = (
-  values: FieldValues,
-  prefix = ''
-): [string, any][] =>
-  Object.entries(values).flatMap(([key, value]): [string, any][] => {
+export const mergeRestoredValues = (current: unknown, stored: unknown): any => {
+  if (!isPlainObject(stored)) return stored;
+
+  const merged: FieldValues = isPlainObject(current) ? { ...current } : {};
+
+  Object.entries(stored).forEach(([key, value]) => {
     // JSON.parse keeps a '__proto__' key as an own property, and writing it
     // would reassign the prototype of the object being restored into.
-    if (isUnsafeKey(key)) return [];
-
-    const path = prefix ? `${prefix}.${key}` : key;
-
-    if (isPlainObject(value) && Object.keys(value).length > 0) {
-      return toLeafEntries(value, path);
-    }
-
-    return [[path, value]];
+    if (isUnsafeKey(key)) return;
+    merged[key] = mergeRestoredValues(merged[key], value);
   });
+
+  return merged;
+};
 
 /**
  * Filters the fields of an object based on included and excluded field lists.
@@ -211,7 +225,7 @@ export const filterIncludedOrExcludedFields = (
       // Unusable or absent paths add nothing. Do NOT widen to the parent as
       // `excluded` does below — that would persist more than was asked for.
       if (!isUsablePath(segments) || !hasAtPath(values, segments)) return acc;
-      return setAtPath(acc, segments, getAtPath(values, segments));
+      return setAtPath(acc, segments, getAtPath(values, segments), values);
     }, {});
   }
 
