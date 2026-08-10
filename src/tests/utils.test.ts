@@ -64,6 +64,16 @@ describe('hasAtPath', () => {
   it('Should stop at a non-container', () => {
     expect(hasAtPath({ name: 'Ada' }, ['name', 'length'])).toBe(false);
   });
+
+  it('Should not count inherited members as fields', () => {
+    expect(hasAtPath(values, ['card', 'toString'])).toBe(false);
+  });
+
+  it('Should only count indices as the fields of an array', () => {
+    // `length` is an own property, but it is not a field: deleting it throws
+    expect(hasAtPath(values, ['items', 'length'])).toBe(false);
+    expect(hasAtPath(values, ['items', '0'])).toBe(true);
+  });
 });
 
 describe('getAtPath', () => {
@@ -123,6 +133,15 @@ describe('deleteAtPath', () => {
     // Not even copied when the first segment misses
     expect(deleteAtPath(source, ['other', 'x'])).toBe(source);
     expect(deleteAtPath(source, [])).toBe(source);
+    // An inherited member is not a field, so there is nothing to delete
+    expect(deleteAtPath(source, ['toString'])).toBe(source);
+  });
+
+  it('Should refuse to delete a non-index member of an array', () => {
+    const source = { items: [{ a: 1 }] };
+
+    // `delete items.length` would throw and abort the whole save
+    expect(deleteAtPath(source, ['items', 'length'])).toEqual(source);
   });
 
   it('Should fail closed when the path cannot be resolved', () => {
@@ -200,6 +219,7 @@ describe('filterIncludedOrExcludedFields', () => {
       filterIncludedOrExcludedFields(values, [
         'card.expiry',
         'card.__proto__.x',
+        'card.toString',
         '',
         'name',
       ])

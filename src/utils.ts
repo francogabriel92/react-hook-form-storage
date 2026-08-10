@@ -8,6 +8,15 @@ const UNSAFE_SEGMENTS = ['__proto__', 'prototype', 'constructor'];
 const isContainer = (value: unknown): value is FieldValues =>
   typeof value === 'object' && value !== null;
 
+// Not `in`, which walks the prototype chain: 'toString' is not a field, and
+// treating it as one would copy or transform an inherited member. The fields of
+// an array are its indices — 'length' is an own property, but excluding it would
+// mean `delete arr.length`, which throws.
+const hasField = (container: FieldValues, segment: string): boolean => {
+  if (Array.isArray(container) && !/^\d+$/.test(segment)) return false;
+  return Object.prototype.hasOwnProperty.call(container, segment);
+};
+
 const cloneContainer = (value: FieldValues): FieldValues =>
   Array.isArray(value) ? [...value] : { ...value };
 
@@ -64,7 +73,7 @@ export const hasAtPath = (source: unknown, segments: string[]): boolean => {
   let current = source;
 
   for (const segment of segments) {
-    if (!isContainer(current) || !(segment in current)) return false;
+    if (!isContainer(current) || !hasField(current, segment)) return false;
     current = current[segment];
   }
 
@@ -122,7 +131,7 @@ export const deleteAtPath = (
   if (segments.length === 0) return target;
 
   const [segment, ...rest] = segments;
-  if (!isContainer(target) || !(segment in target)) return target;
+  if (!isContainer(target) || !hasField(target, segment)) return target;
 
   const container = cloneContainer(target);
 
