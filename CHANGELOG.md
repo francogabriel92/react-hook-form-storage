@@ -16,8 +16,8 @@ widened to the whole parent object.
 - **Per-path `included` and `excluded`.** `excluded: ['card.cvv']` now drops the
   CVV and keeps `card.number`, instead of dropping all of `card`.
   `included: ['card.number']` persists that field alone. Array indices are
-  matched too, and both notations are accepted: `'contacts.0.email'` and
-  `'contacts[0].email'`.
+  matched too, in the dotted form `Path<T>` types (`'contacts.0.email'`);
+  bracket notation resolves identically at runtime but does not type-check.
 - **Per-path `serializer`.** A serializer keyed `'card.expiry'` transforms that
   value in both directions and leaves its siblings alone. Its argument type is
   now inferred from the path via `FieldPathValue` rather than falling back to
@@ -31,8 +31,8 @@ widened to the whole parent object.
 - **Restoring a partially persisted object wiped the rest of it.** `setValue`
   replaces an object outright, so restoring a parent that was filtered down to
   one field cleared the others — including their default values. Restoring now
-  writes the deepest stored paths. Arrays and class instances are still written
-  whole, where replacing is what the caller wants.
+  merges the stored values over the ones the form holds. Arrays and class
+  instances replace rather than merge, so a list can still shrink.
 - **A stored `__proto__` key reached `setValue`.** `JSON.parse` keeps
   `__proto__` as an own property, so restoring data from storage could reassign
   the prototype of the form values object. Those keys are now dropped on
@@ -46,6 +46,11 @@ widened to the whole parent object.
   the cases where the leaf genuinely cannot be reached.
 - The nested-path warning is gone; the only remaining warning covers paths that
   would reach into an object's prototype.
+- A container created while filtering mirrors the shape of the value it came
+  from instead of guessing from the path segment. A `Record<string, T>` keyed by
+  digits stays an object: as an array, a key of `'01'` became a named property
+  that `JSON.stringify` never emits, and an id-like key such as `'10023'` cost
+  50 KB of `null` padding.
 - Only own properties count as fields, and an array's fields are its indices.
   `'card.toString'` resolves to nothing instead of persisting an inherited
   member, and `'contacts.length'` to nothing instead of `delete arr.length`,

@@ -172,7 +172,7 @@ useFormStorage('my-form', form, {
 #### `included` / `excluded`
 
 - **Type**: `Array<Path<T>>`
-- **Description**: Control which fields are stored. Use `included` to specify only certain fields, or `excluded` to omit specific fields. Nested paths and array indices are matched field by field, so their siblings are unaffected. Both `'card.cvv'` and `'contacts[0].email'` notations work.
+- **Description**: Control which fields are stored. Use `included` to specify only certain fields, or `excluded` to omit specific fields. Nested paths and array indices are matched field by field, so their siblings are unaffected. Use the dotted form — `'card.cvv'`, `'contacts.0.email'` — which is what `Path<T>` types. Bracket notation (`'contacts[0].email'`) resolves identically at runtime, but react-hook-form's `Path<T>` does not include it, so it will not type-check.
 
 ```typescript
 // Only store username and email
@@ -198,9 +198,9 @@ useFormStorage('my-form', form, {
 
 An excluded path fails closed: if it cannot be resolved against the current values (for example `'card.cvv'` when `card` holds a string), the whole parent is dropped rather than persisted. An included path that cannot be resolved is simply skipped, so it never persists more than you asked for.
 
-Restoring writes the deepest stored paths, not the parent objects, so fields you kept out of storage keep their default values instead of being wiped.
+Restoring merges the stored values over the ones the form currently holds, so fields you kept out of storage keep their default values instead of being wiped.
 
-Arrays are the exception: they are restored whole, because restoring them index by index could never shrink a list. So a path filtered out from inside an array item — `excluded: ['contacts.0.email']` — comes back `undefined` on restore rather than falling back to its default value.
+Arrays are the exception: they replace rather than merge, because merging them could never shrink a list. So a path filtered out from inside an array item — `excluded: ['contacts.0.email']` — comes back `undefined` on restore rather than falling back to its default value. Class instances replace for the same reason.
 
 #### `onRestore` / `onSave`
 
