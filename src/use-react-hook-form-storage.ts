@@ -3,7 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   debouncer,
   filterIncludedOrExcludedFields,
-  findNestedPaths,
+  findUnsafePaths,
+  toLeafEntries,
   transformValues,
 } from './utils';
 import { UseFormStorageOptions } from './types';
@@ -17,15 +18,15 @@ import { UseFormStorageOptions } from './types';
  * @param {UseFormReturn<T>} form - The react-hook-form instance
  * @param {UseFormStorageOptions<T>} options - Configuration options for storage behavior
  * @param {Storage} [options.storage=localStorage] - Storage implementation to use
- * @param {Path<T>[]} [options.included] - Fields to include in storage (whitelist)
- * @param {Path<T>[]} [options.excluded] - Fields to exclude from storage (blacklist)
+ * @param {Path<T>[]} [options.included] - Fields to include in storage (whitelist). Nested paths and array indices are matched field by field ('card.number', 'items.0.email')
+ * @param {Path<T>[]} [options.excluded] - Fields to exclude from storage (blacklist). Nested paths and array indices are matched field by field, leaving their siblings persisted
  * @param {(values: Partial<T>) => void} [options.onRestore] - Callback when data is restored from storage
  * @param {(values: Partial<T>) => void} [options.onSave] - Callback when data is saved to storage
  * @param {number} [options.debounce] - Debounce delay in milliseconds for auto-save
  * @param {boolean} [options.dirty] - Whether to mark fields as dirty when restoring
  * @param {boolean} [options.touched] - Whether to mark fields as touched when restoring
  * @param {boolean} [options.validate] - Whether to validate fields when restoring
- * @param {Record<string, any>} [options.serializer] - Custom serialization functions for specific fields
+ * @param {SerializerMap<T>} [options.serializer] - Custom serialization functions per field path, nested paths included
  * @param {boolean} [options.autoSave=true] - Whether to automatically save changes
  * @param {boolean} [options.autoRestore=true] - Whether to automatically restore values
  *
@@ -95,21 +96,20 @@ export const useFormStorage = <T extends FieldValues>(
     serializer,
   };
 
-  const nestedPaths = [
-    ...findNestedPaths(included),
-    ...findNestedPaths(excluded),
-    ...findNestedPaths(Object.keys(serializer)),
+  const unsafePaths = [
+    ...findUnsafePaths(included),
+    ...findUnsafePaths(excluded),
+    ...findUnsafePaths(Object.keys(serializer)),
   ].join(', ');
 
   useEffect(() => {
-    if (!nestedPaths) return;
+    if (!unsafePaths) return;
     console.warn(
-      `[FORM-STORAGE] Nested paths are not supported yet and will not be ` +
-        `matched field by field: ${nestedPaths}. An excluded nested path drops ` +
-        `its whole parent object so the value is never persisted; an included ` +
-        `or serialized nested path is ignored. Use top-level fields for now.`
+      `[FORM-STORAGE] These paths reach into an object's prototype and are ` +
+        `not matched: ${unsafePaths}. An included or serialized one is ` +
+        `ignored; an excluded one drops its root field instead.`
     );
-  }, [nestedPaths]);
+  }, [unsafePaths]);
 
   const storageAdapter = useMemo(() => {
     // Resolved here, not as a default parameter: that would evaluate
@@ -172,7 +172,7 @@ export const useFormStorage = <T extends FieldValues>(
             included,
             excluded
           );
-          const serialized = transformValues(valuesToStore, serializer as any);
+          const serialized = transformValues(valuesToStore, serializer);
           await storageAdapter.setItem(key, JSON.stringify(serialized));
           onSave?.(valuesToStore);
         } catch (error) {
@@ -212,12 +212,11 @@ export const useFormStorage = <T extends FieldValues>(
 
         const deserializedValues = transformValues(
           valuesToRestore,
-          // TODO: Fix type casting here
-          serializer as any,
+          serializer,
           true
         );
 
-        Object.entries(deserializedValues).forEach(([field, value]) => {
+        toLeafEntries(deserializedValues).forEach(([field, value]) => {
           setValue(field as Path<T>, value, {
             shouldDirty: dirty,
             shouldTouch: touched,
