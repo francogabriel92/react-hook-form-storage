@@ -14,6 +14,10 @@ const FORM_DEFAULT_VALUES = {
     field1: 'value1',
     field2: 'value2',
   },
+  contacts: [
+    { name: 'Ada', email: 'ada@example.com' },
+    { name: 'Alan', email: 'alan@example.com' },
+  ],
 };
 
 const STORAGE_DEFAULT_VALUES = {
@@ -481,9 +485,7 @@ describe('useFormStorage', () => {
     );
   });
 
-  it('Should not persist a nested excluded path, and should warn', async () => {
-    jest.spyOn(console, 'warn').mockImplementation(() => {});
-
+  it('Should exclude a nested path and keep its siblings', async () => {
     const { setValue } = await renderFormHook({
       excluded: ['nested.field2'],
     });
@@ -492,33 +494,210 @@ describe('useFormStorage', () => {
       setValue('name', TEST_NAME);
     });
 
-    // Fails closed: the parent is dropped rather than leaking the excluded field
     await waitFor(() => {
       const storedValue = JSON.parse(
         localStorage.getItem(STORAGE_TEST_KEY) as string
       );
-      expect(storedValue.nested).toBeUndefined();
+      expect(storedValue.nested).toEqual({
+        field1: FORM_DEFAULT_VALUES.nested.field1,
+      });
       expect(storedValue.name).toBe(TEST_NAME);
+    });
+  });
+
+  it('Should include a nested path without its siblings', async () => {
+    const { setValue } = await renderFormHook({
+      included: ['nested.field1'],
+    });
+
+    act(() => {
+      setValue('name', TEST_NAME);
+    });
+
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_TEST_KEY)).toBe(
+        JSON.stringify({ nested: { field1: FORM_DEFAULT_VALUES.nested.field1 } })
+      );
+    });
+  });
+
+  it('Should restore a nested path without clobbering its siblings', async () => {
+    localStorage.setItem(
+      STORAGE_TEST_KEY,
+      JSON.stringify({ nested: { field1: 'restored' } })
+    );
+
+    const { getValues } = await renderFormHook({
+      included: ['nested.field1'],
+    });
+
+    expect(getValues('nested.field1')).toBe('restored');
+    expect(getValues('nested.field2')).toBe(FORM_DEFAULT_VALUES.nested.field2);
+  });
+
+  it('Should apply a nested serializer in both directions', async () => {
+    const { setValue } = await renderFormHook({
+      included: ['nested'],
+      serializer: {
+        'nested.field1': {
+          serialize: (value) => value.toUpperCase(),
+          deserialize: (value) => value.toLowerCase(),
+        },
+      },
+    });
+
+    act(() => {
+      setValue('nested.field1', 'secret');
+    });
+
+    await waitFor(() => {
+      const storedValue = JSON.parse(
+        localStorage.getItem(STORAGE_TEST_KEY) as string
+      );
+      // The sibling is untouched: the serializer applies to the leaf, not the parent
+      expect(storedValue.nested).toEqual({
+        field1: 'SECRET',
+        field2: FORM_DEFAULT_VALUES.nested.field2,
+      });
+    });
+
+    localStorage.setItem(
+      STORAGE_TEST_KEY,
+      JSON.stringify({ nested: { field1: 'STORED' } })
+    );
+
+    const { getValues } = await renderFormHook({
+      serializer: {
+        'nested.field1': {
+          serialize: (value) => value.toUpperCase(),
+          deserialize: (value) => value.toLowerCase(),
+        },
+      },
+    });
+
+    expect(getValues('nested.field1')).toBe('stored');
+  });
+
+  it('Should match a path through an array index', async () => {
+    const { setValue } = await renderFormHook({
+      excluded: ['contacts.1.email'],
+      serializer: {
+        'contacts.0.email': {
+          serialize: (value) => value.toUpperCase(),
+        },
+      },
+    });
+
+    act(() => {
+      setValue('name', TEST_NAME);
+    });
+
+    await waitFor(() => {
+      const storedValue = JSON.parse(
+        localStorage.getItem(STORAGE_TEST_KEY) as string
+      );
+      expect(storedValue.contacts).toEqual([
+        {
+          name: 'Ada',
+          email: FORM_DEFAULT_VALUES.contacts[0].email.toUpperCase(),
+        },
+        { name: 'Alan' },
+      ]);
+    });
+  });
+
+  it('Should accept bracket notation for array indices', async () => {
+    const { setValue } = await renderFormHook({
+      included: ['contacts[0].name'],
+    } as unknown as Partial<UseFormStorageOptions<typeof FORM_DEFAULT_VALUES>>);
+
+    act(() => {
+      setValue('name', TEST_NAME);
+    });
+
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_TEST_KEY)).toBe(
+        JSON.stringify({ contacts: [{ name: 'Ada' }] })
+      );
+    });
+  });
+
+  it('Should not mutate the form values while filtering or serializing', async () => {
+    const { getValues, setValue } = await renderFormHook({
+      excluded: ['nested.field2'],
+      serializer: {
+        'nested.field1': {
+          serialize: (value) => value.toUpperCase(),
+        },
+      },
+    });
+
+    act(() => {
+      setValue('name', TEST_NAME);
+    });
+
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_TEST_KEY)).not.toBeNull();
+    });
+
+    // Persisting must not edit what the user is typing into
+    expect(getValues('nested')).toEqual(FORM_DEFAULT_VALUES.nested);
+  });
+
+  it('Should fail closed when an excluded path cannot be resolved', async () => {
+    const { setValue } = await renderFormHook({
+      excluded: ['name.deeper'],
+    } as unknown as Partial<UseFormStorageOptions<typeof FORM_DEFAULT_VALUES>>);
+
+    act(() => {
+      setValue('name', TEST_NAME);
+    });
+
+    // `name` is a string, so there is no way to drop just `name.deeper` from it
+    await waitFor(() => {
+      const storedValue = JSON.parse(
+        localStorage.getItem(STORAGE_TEST_KEY) as string
+      );
+      expect(storedValue.name).toBeUndefined();
+      expect(storedValue.email).toBe(FORM_DEFAULT_VALUES.email);
+    });
+  });
+
+  it('Should ignore paths that reach into the prototype, and warn', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { setValue } = await renderFormHook({
+      included: ['nested.field1', 'nested.__proto__.polluted'],
+    } as unknown as Partial<UseFormStorageOptions<typeof FORM_DEFAULT_VALUES>>);
+
+    act(() => {
+      setValue('name', TEST_NAME);
+    });
+
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_TEST_KEY)).toBe(
+        JSON.stringify({ nested: { field1: FORM_DEFAULT_VALUES.nested.field1 } })
+      );
     });
 
     expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining('nested.field2')
+      expect.stringContaining('nested.__proto__.polluted')
     );
   });
 
-  it('Should warn about nested included and serializer paths', async () => {
-    jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-    await renderFormHook({
-      included: ['nested.field1'],
-      serializer: {
-        'nested.field1': { serialize: (value: unknown) => value },
-      },
-    } as unknown as Partial<UseFormStorageOptions<typeof FORM_DEFAULT_VALUES>>);
-
-    expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining('Nested paths are not supported yet')
+  it('Should not restore a stored key that would touch the prototype', async () => {
+    localStorage.setItem(
+      STORAGE_TEST_KEY,
+      `{"name":"${TEST_NAME}","__proto__":{"polluted":true}}`
     );
+
+    const { getValues } = await renderFormHook();
+
+    expect(getValues('name')).toBe(TEST_NAME);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(
+      (getValues() as Record<string, unknown>).polluted
+    ).toBeUndefined();
   });
 
   it('Should not save values if autoSave is false', async () => {

@@ -19,13 +19,13 @@ module.exports = {
   ],
   coverageReporters: ['json', 'lcov', 'text', 'clover'],
   coverageDirectory: 'coverage',
-  // Floors just under current (94.7 / 89.7 / 100 / 97.4).
+  // Floors just under current (96.6 / 94.2 / 100 / 98.2).
   coverageThreshold: {
     global: {
-      statements: 93,
-      branches: 85,
+      statements: 96,
+      branches: 93,
       functions: 95,
-      lines: 95,
+      lines: 97,
     },
   },
 };
