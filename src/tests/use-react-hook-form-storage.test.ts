@@ -26,24 +26,27 @@ const STORAGE_TEST_KEY = 'testKey';
 const TEST_NAME = 'testName';
 const TEST_EMAIL = 'test@example.com';
 
-const renderFormHook = async (
-  options: Partial<UseFormStorageOptions<typeof FORM_DEFAULT_VALUES>> = {}
-) => {
-  const result = await act(async () => {
-    const { result } = renderHook(() => {
-      const form = useForm({
-        defaultValues: FORM_DEFAULT_VALUES,
-      });
-
-      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
-        ...options,
-      } as UseFormStorageOptions<typeof FORM_DEFAULT_VALUES>);
-
-      return { form, formStorage };
+const renderStorageHook = (
+  options: Partial<UseFormStorageOptions<typeof FORM_DEFAULT_VALUES>> = {},
+  key = STORAGE_TEST_KEY
+) =>
+  renderHook(() => {
+    const form = useForm({
+      defaultValues: FORM_DEFAULT_VALUES,
     });
 
-    return result;
+    const formStorage = useFormStorage(key, form, {
+      ...options,
+    } as UseFormStorageOptions<typeof FORM_DEFAULT_VALUES>);
+
+    return { form, formStorage };
   });
+
+const renderFormHook = async (
+  options: Partial<UseFormStorageOptions<typeof FORM_DEFAULT_VALUES>> = {},
+  key = STORAGE_TEST_KEY
+) => {
+  const result = await act(async () => renderStorageHook(options, key).result);
 
   if (!result) throw new Error('Hook did not render');
 
@@ -54,15 +57,24 @@ const renderFormHook = async (
     getValues: form.getValues,
     setValue: form.setValue,
     formStorage,
+    // The destructured values above are a snapshot; tests asserting state that
+    // changes after the first render need the live handle.
+    result,
   };
 };
 
+/** Lets pending timers and promises run without asserting on them. */
+const settle = (ms: number) =>
+  act(async () => {
+    await new Promise((res) => setTimeout(res, ms));
+  });
+
 beforeEach(() => {
+  // restoreMocks/clearMocks are set in jest.config.js, so they cover every
+  // test file rather than just this one.
   jest.useRealTimers();
-  jest.restoreAllMocks();
   localStorage.clear();
   sessionStorage.clear();
-  jest.clearAllMocks();
 });
 
 describe('useFormStorage', () => {
@@ -368,13 +380,9 @@ describe('useFormStorage', () => {
     const DEBOUNCE_TIME = 300;
     const onSaveMock = jest.fn();
 
-    const { result, unmount } = renderHook(() => {
-      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
-      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
-        debounce: DEBOUNCE_TIME,
-        onSave: onSaveMock,
-      });
-      return { form, formStorage };
+    const { result, unmount } = renderStorageHook({
+      debounce: DEBOUNCE_TIME,
+      onSave: onSaveMock,
     });
 
     act(() => {
@@ -389,8 +397,6 @@ describe('useFormStorage', () => {
 
     expect(onSaveMock).not.toHaveBeenCalled();
     expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
-
-    jest.useRealTimers();
   });
 
   it('Should apply serialization when saving values', async () => {
@@ -663,9 +669,9 @@ describe('useFormStorage', () => {
   });
 
   it('Should not let a slow earlier write overwrite a faster later one', async () => {
-    // The first write is slow and must already be IN FLIGHT before the second is
-    // issued, otherwise it is merely superseded and never reaches the adapter —
-    // which is what made the earlier version of this test vacuous.
+    // The first write is slow and must already be IN FLIGHT before the second
+    // is issued, otherwise it is merely superseded and never reaches the
+    // adapter, leaving nothing to order.
     const mockStorage = createMockRemoteStore({
       delayMs: 0,
       saveDelaysMs: [80, 0],
@@ -677,9 +683,7 @@ describe('useFormStorage', () => {
       setValue('name', 'FIRST');
     });
 
-    await act(async () => {
-      await new Promise((res) => setTimeout(res, 10));
-    });
+    await settle(10);
 
     act(() => {
       setValue('name', 'SECOND');
@@ -729,13 +733,7 @@ describe('useFormStorage', () => {
       saveDelaysMs: [120],
     });
 
-    const { result } = renderHook(() => {
-      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
-      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
-        storage: mockStorage,
-      });
-      return { form, formStorage };
-    });
+    const { result } = renderStorageHook({ storage: mockStorage });
 
     act(() => {
       result.current.form.setValue('name', TEST_NAME);
@@ -748,12 +746,52 @@ describe('useFormStorage', () => {
     expect(await mockStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
 
     // Give the slow save every chance to land after clear() resolved
-    await act(async () => {
-      await new Promise((res) => setTimeout(res, 300));
-    });
+    await settle(300);
 
     expect(await mockStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
     expect(result.current.formStorage.isRestored).toBe(false);
+  });
+
+  it('Should still clear when an earlier write never settles', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    jest.useFakeTimers();
+
+    let removeCalls = 0;
+    const hungStorage = {
+      getItem: async () => null,
+      // Never settles: routing clear() through the write chain must not let a
+      // broken adapter hang a delete the caller is awaiting.
+      setItem: () => new Promise<void>(() => {}),
+      removeItem: async () => {
+        removeCalls += 1;
+      },
+    };
+
+    const { result } = renderStorageHook({
+      storage: hungStorage,
+      autoSave: false,
+    });
+
+    let cleared = false;
+    act(() => {
+      result.current.formStorage.save();
+      result.current.formStorage.clear().then(() => {
+        cleared = true;
+      });
+    });
+
+    // Before the bound elapses the delete is still correctly queued behind it
+    await act(async () => {
+      jest.advanceTimersByTime(9000);
+    });
+    expect(removeCalls).toBe(0);
+
+    await act(async () => {
+      jest.advanceTimersByTime(2000);
+    });
+
+    expect(removeCalls).toBe(1);
+    expect(cleared).toBe(true);
   });
 
   it('Should still clear when a save is issued before clear gets its turn', async () => {
@@ -764,13 +802,7 @@ describe('useFormStorage', () => {
       saveDelaysMs: [100],
     });
 
-    const { result } = renderHook(() => {
-      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
-      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
-        storage: mockStorage,
-      });
-      return { form, formStorage };
-    });
+    const { result } = renderStorageHook({ storage: mockStorage });
 
     act(() => {
       result.current.form.setValue('name', 'FIRST');
@@ -785,9 +817,7 @@ describe('useFormStorage', () => {
     await act(async () => {
       await clearPromise;
     });
-    await act(async () => {
-      await new Promise((res) => setTimeout(res, 400));
-    });
+    await settle(400);
 
     // The delete must have actually reached the adapter
     expect(mockStorage.removes).toEqual([STORAGE_TEST_KEY]);
@@ -822,9 +852,7 @@ describe('useFormStorage', () => {
     act(() => {
       result.current.form.setValue('name', 'A-OLD');
     });
-    await act(async () => {
-      await new Promise((res) => setTimeout(res, 10));
-    });
+    await settle(10);
     act(() => {
       result.current.form.setValue('name', 'A-LATEST');
     });
@@ -837,9 +865,7 @@ describe('useFormStorage', () => {
       result.current.form.setValue('name', 'FOR-B');
     });
 
-    await act(async () => {
-      await new Promise((res) => setTimeout(res, 400));
-    });
+    await settle(400);
 
     const forA = await mockStorage.getItem('keyA');
     const forB = await mockStorage.getItem('keyB');
@@ -856,13 +882,7 @@ describe('useFormStorage', () => {
       saveDelaysMs: [60],
     });
 
-    const { result } = renderHook(() => {
-      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
-      const formStorage = useFormStorage('__proto__', form, {
-        storage: mockStorage,
-      });
-      return { form, formStorage };
-    });
+    const { result } = renderStorageHook({ storage: mockStorage }, '__proto__');
 
     act(() => {
       result.current.form.setValue('name', 'ONE');
@@ -881,13 +901,7 @@ describe('useFormStorage', () => {
   it('Should not let a debounced save resurrect data after clear', async () => {
     // The user types, hits clear, and touches nothing else. A save scheduled
     // before the clear must not fire afterwards and bring the draft back.
-    const { result } = renderHook(() => {
-      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
-      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
-        debounce: 200,
-      });
-      return { form, formStorage };
-    });
+    const { result } = renderStorageHook({ debounce: 200 });
 
     act(() => {
       result.current.form.setValue('name', 'PRE-CLEAR-EDIT');
@@ -900,9 +914,7 @@ describe('useFormStorage', () => {
     expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
 
     // Well past the debounce window, with no further edit
-    await act(async () => {
-      await new Promise((res) => setTimeout(res, 400));
-    });
+    await settle(400);
 
     expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
   });
@@ -916,14 +928,10 @@ describe('useFormStorage', () => {
       saveDelaysMs: [80, 0],
     });
 
-    const { result } = renderHook(() => {
-      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
-      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
-        storage: mockStorage,
-        autoSave: false,
-        onSave: onSaveMock,
-      });
-      return { form, formStorage };
+    const { result } = renderStorageHook({
+      storage: mockStorage,
+      autoSave: false,
+      onSave: onSaveMock,
     });
 
     await act(async () => {
@@ -1037,11 +1045,7 @@ describe('useFormStorage', () => {
 
     // Read through result.current: the flag changes after the initial render,
     // so a destructured snapshot would go stale.
-    const { result } = renderHook(() => {
-      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
-      const formStorage = useFormStorage(STORAGE_TEST_KEY, form);
-      return { form, formStorage };
-    });
+    const { result } = renderStorageHook();
 
     await waitFor(() => {
       expect(result.current.formStorage.isRestored).toBe(true);
@@ -1135,13 +1139,9 @@ describe('useFormStorage', () => {
       JSON.stringify(STORAGE_DEFAULT_VALUES)
     );
 
-    const { result } = renderHook(() => {
-      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
-      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
-        storage: mockStorage,
-        autoRestore: false,
-      });
-      return { form, formStorage };
+    const { result } = renderStorageHook({
+      storage: mockStorage,
+      autoRestore: false,
     });
 
     expect(result.current.formStorage.isLoading).toBe(false);

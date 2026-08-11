@@ -5,6 +5,13 @@ export type Serializer<T, K extends keyof T> = {
   deserialize?: (value: any) => T[K];
 };
 
+export type WriteOptions = {
+  /** Whether a newer queued write for the same key may drop this one. */
+  supersedable?: boolean;
+  /** How long to wait for the writes already queued before giving up on order. */
+  maxWaitMs?: number;
+};
+
 export type UseFormStorageAdapter = {
   getItem: (key: string) => Promise<string | null>;
   setItem: (key: string, value: string) => Promise<void>;

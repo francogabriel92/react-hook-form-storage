@@ -5,8 +5,13 @@ import {
   filterIncludedOrExcludedFields,
   findNestedPaths,
   transformValues,
+  withMaxWait,
 } from './utils';
-import { UseFormStorageOptions } from './types';
+import { UseFormStorageOptions, WriteOptions } from './types';
+
+// Long enough that no adapter which is merely slow is ever cut off, short
+// enough that a broken one does not hang clear() for the session.
+const CLEAR_MAX_QUEUE_WAIT_MS = 10_000;
 
 /**
  * A React hook that provides automatic storage synchronization for react-hook-form.
@@ -152,57 +157,52 @@ export const useFormStorage = <T extends FieldValues>(
     return { setItem, getItem, removeItem };
   }, [storage]);
 
-  // Chained so mutations reach an async adapter in issue order: otherwise a slow
-  // earlier one can resolve last and undo a newer one. Clearing has to go
-  // through here too, or a pending save lands afterwards and resurrects the
-  // data that was just cleared.
+  // Chained so mutations reach an async adapter in issue order: otherwise a
+  // slow earlier one can resolve last and undo a newer one. Clearing goes
+  // through here too, or a pending save lands after it and resurrects the data.
   const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
   // Counted per key: a write for one key says nothing about whether a pending
-  // write for a different key is still wanted. Prototype-less because the key
-  // comes from the caller: on a plain object, `rec['__proto__'] = n` is a no-op
-  // and the read returns Object.prototype, so that one key would never be seen
-  // as superseded.
+  // write for a different key is still wanted. Prototype-less so that a key
+  // named `__proto__` is counted like any other instead of reading back
+  // Object.prototype.
   const latestWriteRef = useRef<Record<string, number>>(Object.create(null));
 
   const enqueueWrite = useCallback(
+    // Opting IN to coalescing, not out of it: forgetting the flag costs an
+    // extra write, whereas the reverse would silently drop an operation the
+    // caller awaited. Only autosave passes it.
     (
-      writeKey: string,
       mutate: () => Promise<void>,
-      // Destructured per property, not on the whole object: with a default on
-      // the object, passing a partial one would leave supersedable undefined and
-      // silently invert this default.
-      { supersedable = true }: { supersedable?: boolean } = {}
+      { supersedable, maxWaitMs }: WriteOptions = {}
     ) => {
-      const writeId = (latestWriteRef.current[writeKey] ?? 0) + 1;
-      latestWriteRef.current[writeKey] = writeId;
+      const writeId = (latestWriteRef.current[key] ?? 0) + 1;
+      latestWriteRef.current[key] = writeId;
 
       const run = async () => {
-        // Only a save may be dropped when a newer one is already queued:
-        // coalescing away a stale value is safe, silently dropping a delete is
-        // not — the caller asked for it and would get a successful resolve.
-        if (supersedable && writeId < (latestWriteRef.current[writeKey] ?? 0)) {
+        // Coalescing away a stale value is safe; silently dropping a delete or
+        // an awaited save is not — the caller would get a successful resolve.
+        if (supersedable && writeId < (latestWriteRef.current[key] ?? 0)) {
           return;
         }
         await mutate();
       };
 
       // Both branches: a rejection must not stall every later write.
-      const next = writeChainRef.current.then(run, run);
+      const previous = maxWaitMs
+        ? withMaxWait(writeChainRef.current, maxWaitMs)
+        : writeChainRef.current;
+      const next = previous.then(run, run);
       writeChainRef.current = next;
       return next;
     },
-    []
+    [key]
   );
 
   const saveToStorage = useCallback(
-    async (
-      values: Record<string, any>,
-      { supersedable = true }: { supersedable?: boolean } = {}
-    ) => {
+    async (values: Record<string, any>, writeOptions?: WriteOptions) => {
       const { included, excluded, serializer, onSave } = optionsRef.current;
 
       return enqueueWrite(
-        key,
         async () => {
           try {
             const valuesToStore = filterIncludedOrExcludedFields(
@@ -220,7 +220,7 @@ export const useFormStorage = <T extends FieldValues>(
             console.error(`[FORM-STORAGE] Failed to save data: ${error}`);
           }
         },
-        { supersedable }
+        writeOptions
       );
     },
     [key, storageAdapter, enqueueWrite]
@@ -302,8 +302,10 @@ export const useFormStorage = <T extends FieldValues>(
   useEffect(() => {
     if (!autoSave) return;
 
+    // The one coalescing caller: a keystroke superseded by a later one carries
+    // a value nobody is waiting on.
     const handleChange = (values: Record<string, any>) =>
-      saveToStorageRef.current(values);
+      saveToStorageRef.current(values, { supersedable: true });
 
     const debouncedHandleChange = debounce
       ? debouncer(handleChange, debounce)
@@ -323,19 +325,19 @@ export const useFormStorage = <T extends FieldValues>(
   return {
     isRestored,
     isLoading,
-    // Not supersedable: autosave may coalesce, but a caller who awaits save()
-    // and gets a resolve must have had their write and their onSave happen.
-    save: async () =>
-      saveToStorage(form.getValues(), { supersedable: false }),
+    save: async () => saveToStorage(form.getValues()),
     clear: async () => {
       cancelDebouncedSaveRef.current?.();
       return enqueueWrite(
-        key,
         async () => {
           await storageAdapter.removeItem(key);
           setIsRestored(false);
         },
-        { supersedable: false }
+        // Bounded only here: a save that hangs is just a save that hangs, but a
+        // delete is a destructive intent the caller is awaiting, and queueing it
+        // behind an adapter write that never settles would hang it forever.
+        // Every adapter that resolves or rejects keeps full ordering.
+        { maxWaitMs: CLEAR_MAX_QUEUE_WAIT_MS }
       );
     },
     restore: async () => restoreDataFromStorage(),

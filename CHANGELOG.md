@@ -22,6 +22,12 @@ green in the first place. No API changes.
   save issued after `clear()` but before its turn caused the delete to be skipped
   — while `await clear()` still resolved successfully. Coalescing away a stale
   value is safe; dropping a delete is not, and `clear()` is no longer skippable.
+- **`clear()` could hang forever behind a broken adapter.** Routing it through
+  the write chain — which is what stops a queued save landing after the delete —
+  also queued it behind writes already in flight, so an adapter whose `setItem`
+  never settles left `clear()` never running and never resolving. It now waits
+  at most 10 seconds for the queue before deleting anyway. Ordering is unchanged
+  for every adapter that resolves or rejects; only a broken one is cut off.
 - **An explicit `save()` could be dropped.** Two concurrent `save()` calls
   coalesced into one: the first never wrote and its `onSave` never fired, yet it
   resolved without error. Autosave still coalesces — that is the point of it —
@@ -39,7 +45,8 @@ These do not change behavior, but the release exists because they were missing.
 - The test suite was order-dependent: `jest --randomize` failed 6 to 9 of 38
   tests on every run, and it passed only because jest's default order is fixed.
   Caused by an unawaited `act(async ...)` and by fake timers never being
-  restored. CI now runs tests in randomized order so this cannot hide again.
+  restored. `randomize` is now set in `jest.config.js`, so a local `npm test`
+  catches this too rather than only CI.
 - The write-ordering test asserted its own name rather than its behavior — both
   values were written in one synchronous block, so only ONE write ever reached
   the adapter and the test passed with the supersede guard deleted. Rewritten,
@@ -47,9 +54,10 @@ These do not change behavior, but the release exists because they were missing.
 - `isLoading` was never asserted to be `true`, so making it a constant `false`
   passed every gate with identical coverage while breaking the documented
   loading-state guard. Covered now on both the mount and manual-restore paths.
-- Test files had no type checking at all: `tsc` excluded them and
-  `isolatedModules` disabled ts-jest's diagnostics. Enabling it surfaced three
-  real errors, including a missing `@types/react-dom`.
+- Test files had no type checking at all: `tsconfig.json` excluded them, so
+  `npm run typecheck` never saw them. Including them surfaced three real errors,
+  including a missing `@types/react-dom`. The published build is unaffected —
+  `tsconfig.build.json` still excludes `src/tests`.
 
 ## [1.3.1]
 

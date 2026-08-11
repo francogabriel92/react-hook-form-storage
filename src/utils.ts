@@ -65,6 +65,26 @@ export const debouncer = <T extends (...args: any[]) => any>(
 };
 
 /**
+ * Resolves when `promise` settles, or after `ms`, whichever comes first.
+ * The timer is always cleared, so a settled promise leaves nothing pending.
+ * @param promise The promise to wait for.
+ * @param ms How long to wait before giving up on it.
+ * @returns A promise that never rejects.
+ */
+export const withMaxWait = (
+  promise: Promise<unknown>,
+  ms: number
+): Promise<void> =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    promise.then(done, done);
+  });
+
+/**
  * Transforms the field values of an object using the provided serializer.
  * @param values The object containing field values to transform.
  * @param serializer An optional serializer object mapping field paths to serialization functions.

@@ -11,6 +11,11 @@ module.exports = {
   transform: {
     '^.+\\.(ts|tsx)$': 'ts-jest',
   },
+  // Order independence is a property of the suite, not of one CI invocation:
+  // set here, a local `npm test` catches the leak that CI would.
+  randomize: true,
+  restoreMocks: true,
+  clearMocks: true,
   collectCoverageFrom: [
     'src/**/*.(ts|tsx)',
     '!src/**/*.d.ts',
