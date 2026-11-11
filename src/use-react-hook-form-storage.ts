@@ -120,19 +120,23 @@ export const useFormStorage = <T extends FieldValues>(
     const resolvedStorage =
       storage ?? (typeof window !== 'undefined' ? window.localStorage : null);
 
-    // Resolves to whether the value was stored, so onSave fires only then.
-    const setItem = async (key: string, value: string) => {
+    // Resolves to whether the call succeeded. onSave and clear() check it.
+    const attempt = async (call: () => unknown, failure: string) => {
       if (!resolvedStorage) return false;
       try {
-        await resolvedStorage.setItem(key, value);
+        await call();
         return true;
       } catch (error) {
-        console.error(
-          `[FORM-STORAGE] Failed to save data to storage: ${error}`
-        );
+        console.error(`[FORM-STORAGE] Failed to ${failure}: ${error}`);
         return false;
       }
     };
+
+    const setItem = (key: string, value: string) =>
+      attempt(
+        () => resolvedStorage?.setItem(key, value),
+        'save data to storage'
+      );
 
     const getItem = async (key: string) => {
       if (!resolvedStorage) return null;
@@ -146,17 +150,8 @@ export const useFormStorage = <T extends FieldValues>(
       }
     };
 
-    // Resolves to whether the value was removed.
-    const removeItem = async (key: string) => {
-      if (!resolvedStorage) return false;
-      try {
-        await resolvedStorage.removeItem(key);
-        return true;
-      } catch (error) {
-        console.error(`[FORM-STORAGE] Failed to clear storage: ${error}`);
-        return false;
-      }
-    };
+    const removeItem = (key: string) =>
+      attempt(() => resolvedStorage?.removeItem(key), 'clear storage');
 
     return { setItem, getItem, removeItem };
   }, [storage]);
@@ -245,11 +240,7 @@ export const useFormStorage = <T extends FieldValues>(
       if (storedValue) {
         const parsedValue = JSON.parse(storedValue);
         // Anything else would spread into junk fields such as "0" and "1".
-        if (
-          typeof parsedValue !== 'object' ||
-          parsedValue === null ||
-          Array.isArray(parsedValue)
-        ) {
+        if (parsedValue?.constructor !== Object) {
           throw new Error('the stored value is not an object');
         }
 

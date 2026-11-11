@@ -48,7 +48,7 @@ export const findNestedPaths = (paths?: string[]): string[] =>
 export const debouncer = <T extends (...args: any[]) => any>(
   cb: T,
   delay: number
-): T & { cancel: () => void; flush: () => void } => {
+) => {
   let timeout: ReturnType<typeof setTimeout> | null = null;
   let pendingArgs: Parameters<T> | null = null;
 
@@ -70,10 +70,7 @@ export const debouncer = <T extends (...args: any[]) => any>(
     timeout = setTimeout(flush, delay);
   };
 
-  return Object.assign(debounced, { cancel, flush }) as unknown as T & {
-    cancel: () => void;
-    flush: () => void;
-  };
+  return Object.assign(debounced, { cancel, flush });
 };
 
 /**
