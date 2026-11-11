@@ -929,6 +929,53 @@ describe('useFormStorage 1.3.2 write ordering', () => {
     expect(onSave).toHaveBeenCalledTimes(2);
   });
 
+  it('coalesces autosaves queued behind each other', async () => {
+    const storage = createMockRemoteStore({ delayMs: 10 });
+    const setItem = jest.spyOn(storage, 'setItem');
+    const result = renderPlain({ storage });
+
+    await act(async () => {
+      result.current.form.setValue('name', 'a');
+      result.current.form.setValue('name', 'b');
+      result.current.form.setValue('name', 'c');
+    });
+    await act(() => new Promise((res) => setTimeout(res, 50)));
+
+    expect(setItem).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(setItem.mock.calls[0][1]).name).toBe('c');
+  });
+
+  it('does not drop a queued autosave for the previous key', async () => {
+    const storage = createMockRemoteStore({ delayMs: 20 });
+    const { result, rerender } = renderHook(
+      ({ storageKey }: { storageKey: string }) => {
+        const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+        useFormStorage(storageKey, form, { storage, autoRestore: false });
+        return { form };
+      },
+      { initialProps: { storageKey: 'a' } }
+    );
+
+    await act(async () => {
+      result.current.form.setValue('name', 'first');
+    });
+    // Queued behind the in-flight write above.
+    await act(async () => {
+      result.current.form.setValue('name', 'second');
+    });
+    await act(async () => {
+      rerender({ storageKey: 'b' });
+    });
+    await act(async () => {
+      result.current.form.setValue('name', 'third');
+    });
+    await act(() => new Promise((res) => setTimeout(res, 100)));
+
+    expect(JSON.parse((await storage.getItem('a')) as string).name).toBe(
+      'second'
+    );
+  });
+
   it('does not call onSave when the write fails', async () => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
     const onSave = jest.fn();
