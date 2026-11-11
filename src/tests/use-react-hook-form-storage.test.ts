@@ -240,8 +240,8 @@ describe('useFormStorage', () => {
 
     const { formStorage } = await renderFormHook();
 
-    act(() => {
-      formStorage.clear();
+    await act(async () => {
+      await formStorage.clear();
     });
 
     expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
@@ -621,8 +621,8 @@ describe('useFormStorage', () => {
     expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
 
     // Clear the value and check if mockStorage is cleared
-    act(() => {
-      formStorage.clear();
+    await act(async () => {
+      await formStorage.clear();
     });
 
     await waitFor(async () => {
@@ -715,8 +715,8 @@ describe('useFormStorage', () => {
       storage: mockStorage,
     });
 
-    act(() => {
-      formStorage.clear();
+    await act(async () => {
+      await formStorage.clear();
     });
 
     // Assert that the error is logged
@@ -872,5 +872,73 @@ describe('useFormStorage', () => {
       expect(getValues('name')).toBe(STORAGE_DEFAULT_VALUES.name);
       expect(getValues('email')).toBe(STORAGE_DEFAULT_VALUES.email);
     });
+  });
+});
+
+describe('useFormStorage 1.3.2 write ordering', () => {
+  const renderPlain = (
+    options: Partial<UseFormStorageOptions<typeof FORM_DEFAULT_VALUES>>
+  ) =>
+    renderHook(() => {
+      const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
+      const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
+        autoRestore: false,
+        ...options,
+      } as UseFormStorageOptions<typeof FORM_DEFAULT_VALUES>);
+      return { form, formStorage };
+    }).result;
+
+  it('clear() cancels a pending debounced save', async () => {
+    const result = renderPlain({ debounce: 50 });
+
+    await act(async () => {
+      result.current.form.setValue('name', TEST_NAME);
+      await result.current.formStorage.clear();
+    });
+    await act(() => new Promise((res) => setTimeout(res, 100)));
+
+    expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
+  });
+
+  it('clear() runs after the saves queued before it', async () => {
+    const storage = createMockRemoteStore({ delayMs: 20 });
+    const result = renderPlain({ storage });
+
+    await act(async () => {
+      result.current.form.setValue('name', TEST_NAME);
+      result.current.form.setValue('email', TEST_EMAIL);
+      void result.current.formStorage.save();
+      await result.current.formStorage.clear();
+    });
+
+    expect(await storage.getItem(STORAGE_TEST_KEY)).toBeNull();
+  });
+
+  it('never drops an explicit save()', async () => {
+    const onSave = jest.fn();
+    const storage = createMockRemoteStore({ delayMs: 10 });
+    const result = renderPlain({ storage, autoSave: false, onSave });
+
+    await act(async () => {
+      await Promise.all([
+        result.current.formStorage.save(),
+        result.current.formStorage.save(),
+      ]);
+    });
+
+    expect(onSave).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not call onSave when the write fails', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    const onSave = jest.fn();
+    const storage = createMockRemoteStore({ delayMs: 0, shouldFailSave: true });
+    const result = renderPlain({ storage, autoSave: false, onSave });
+
+    await act(async () => {
+      await result.current.formStorage.save();
+    });
+
+    expect(onSave).not.toHaveBeenCalled();
   });
 });

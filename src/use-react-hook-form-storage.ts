@@ -117,14 +117,17 @@ export const useFormStorage = <T extends FieldValues>(
     const resolvedStorage =
       storage ?? (typeof window !== 'undefined' ? window.localStorage : null);
 
+    // Resolves to whether the value was stored, so onSave fires only then.
     const setItem = async (key: string, value: string) => {
-      if (!resolvedStorage) return;
+      if (!resolvedStorage) return false;
       try {
-        return await resolvedStorage.setItem(key, value);
+        await resolvedStorage.setItem(key, value);
+        return true;
       } catch (error) {
         console.error(
           `[FORM-STORAGE] Failed to save data to storage: ${error}`
         );
+        return false;
       }
     };
 
@@ -152,19 +155,30 @@ export const useFormStorage = <T extends FieldValues>(
     return { setItem, getItem, removeItem };
   }, [storage]);
 
-  // Chained so writes reach an async adapter in issue order: otherwise a slow
-  // earlier write can resolve last and overwrite fresher values.
-  const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
-  const latestWriteRef = useRef(0);
+  // Chained so saves and clears reach an async adapter in issue order:
+  // otherwise a slow earlier one can resolve last and undo a newer one.
+  const writeChainRef = useRef<Promise<void>>(Promise.resolve());
+
+  // Both branches: a rejection must not stall every later write.
+  const enqueue = useCallback((mutate: () => Promise<void>) => {
+    const next = writeChainRef.current.then(mutate, mutate);
+    writeChainRef.current = next;
+    return next;
+  }, []);
+
+  // Per key, autosave only: a newer keystroke makes a queued older one
+  // pointless, but an explicit save() is awaited and must always run.
+  const latestAutosaveRef = useRef(new Map<string, number>());
 
   const saveToStorage = useCallback(
-    async (values: Record<string, any>) => {
+    async (values: Record<string, any>, autosave = false) => {
       const { included, excluded, serializer, onSave } = optionsRef.current;
-      const writeId = ++latestWriteRef.current;
+      const latest = latestAutosaveRef.current;
+      const writeId = (latest.get(key) ?? 0) + 1;
+      if (autosave) latest.set(key, writeId);
 
-      const write = async () => {
-        // Superseded while queued.
-        if (writeId < latestWriteRef.current) return;
+      return enqueue(async () => {
+        if (autosave && writeId < (latest.get(key) ?? 0)) return;
 
         try {
           const valuesToStore = filterIncludedOrExcludedFields(
@@ -173,19 +187,17 @@ export const useFormStorage = <T extends FieldValues>(
             excluded
           );
           const serialized = transformValues(valuesToStore, serializer as any);
-          await storageAdapter.setItem(key, JSON.stringify(serialized));
-          onSave?.(valuesToStore);
+          const stored = await storageAdapter.setItem(
+            key,
+            JSON.stringify(serialized)
+          );
+          if (stored) onSave?.(valuesToStore);
         } catch (error) {
           console.error(`[FORM-STORAGE] Failed to save data: ${error}`);
         }
-      };
-
-      // Both branches: a rejection must not stall every later write.
-      const next = writeChainRef.current.then(write, write);
-      writeChainRef.current = next;
-      return next;
+      });
     },
-    [key, storageAdapter]
+    [key, storageAdapter, enqueue]
   );
 
   const restoreDataFromStorage = useCallback(async () => {
@@ -257,21 +269,27 @@ export const useFormStorage = <T extends FieldValues>(
     saveToStorageRef.current = saveToStorage;
   }, [saveToStorage]);
 
+  // Lets clear() cancel a pending debounced save, which would otherwise fire
+  // after the clear and write the data back.
+  const cancelPendingSaveRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     if (!autoSave) return;
 
     const handleChange = (values: Record<string, any>) =>
-      saveToStorageRef.current(values);
+      saveToStorageRef.current(values, true);
 
     const debouncedHandleChange = debounce
       ? debouncer(handleChange, debounce)
       : null;
+    cancelPendingSaveRef.current = debouncedHandleChange?.cancel ?? null;
 
     const subscription = watch(debouncedHandleChange ?? handleChange);
 
     return () => {
       subscription.unsubscribe();
       debouncedHandleChange?.cancel();
+      cancelPendingSaveRef.current = null;
     };
   }, [watch, debounce, autoSave]);
 
@@ -280,8 +298,12 @@ export const useFormStorage = <T extends FieldValues>(
     isLoading,
     save: async () => saveToStorage(form.getValues()),
     clear: async () => {
-      await storageAdapter.removeItem(key);
-      setIsRestored(false);
+      cancelPendingSaveRef.current?.();
+      // Queued, so a save issued before the clear cannot land after it.
+      await enqueue(async () => {
+        await storageAdapter.removeItem(key);
+        setIsRestored(false);
+      });
     },
     restore: async () => restoreDataFromStorage(),
   };
