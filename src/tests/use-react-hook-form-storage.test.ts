@@ -976,6 +976,36 @@ describe('useFormStorage 1.3.2 write ordering', () => {
     );
   });
 
+  it('clear() discards a restore that is still reading', async () => {
+    const storage = createMockRemoteStore({ delayMs: 50 });
+    await storage.setItem(STORAGE_TEST_KEY, JSON.stringify({ name: 'old' }));
+    const result = renderPlain({ storage, autoRestore: true });
+
+    await act(async () => {
+      await result.current.formStorage.clear();
+    });
+    await act(() => new Promise((res) => setTimeout(res, 200)));
+
+    expect(await storage.getItem(STORAGE_TEST_KEY)).toBeNull();
+    expect(result.current.form.getValues('name')).toBe('');
+    expect(result.current.formStorage.isLoading).toBe(false);
+  });
+
+  it.each(['5', '"text"', '[1,2]', 'null'])(
+    'ignores a stored value that is not an object: %s',
+    async (raw) => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      localStorage.setItem(STORAGE_TEST_KEY, raw);
+      const result = renderPlain({ autoRestore: true, autoSave: false });
+      await act(() => new Promise((res) => setTimeout(res, 10)));
+
+      expect(result.current.formStorage.isRestored).toBe(false);
+      expect(Object.keys(result.current.form.getValues())).toEqual(
+        Object.keys(FORM_DEFAULT_VALUES)
+      );
+    }
+  );
+
   it('does not call onSave when the write fails', async () => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
     const onSave = jest.fn();

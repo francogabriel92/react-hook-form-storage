@@ -200,7 +200,12 @@ export const useFormStorage = <T extends FieldValues>(
     [key, storageAdapter, enqueue]
   );
 
+  // Bumped by every restore and by clear(): a restore whose read resolves
+  // after a newer restore or a clear must not apply stale values.
+  const restoreIdRef = useRef(0);
+
   const restoreDataFromStorage = useCallback(async () => {
+    const restoreId = ++restoreIdRef.current;
     const {
       included,
       excluded,
@@ -213,8 +218,17 @@ export const useFormStorage = <T extends FieldValues>(
     setIsLoading(true);
     try {
       const storedValue = await storageAdapter.getItem(key);
+      if (restoreId !== restoreIdRef.current) return;
       if (storedValue) {
-        const parsedValue = JSON.parse(storedValue) as FieldValues;
+        const parsedValue = JSON.parse(storedValue);
+        // Anything else would spread into junk fields such as "0" and "1".
+        if (
+          typeof parsedValue !== 'object' ||
+          parsedValue === null ||
+          Array.isArray(parsedValue)
+        ) {
+          throw new Error('the stored value is not an object');
+        }
 
         const valuesToRestore = filterIncludedOrExcludedFields(
           parsedValue,
@@ -247,7 +261,7 @@ export const useFormStorage = <T extends FieldValues>(
         `[FORM-STORAGE] Failed to restore data from storage: ${error}`
       );
     } finally {
-      setIsLoading(false);
+      if (restoreId === restoreIdRef.current) setIsLoading(false);
     }
   }, [key, storageAdapter, setValue]);
 
@@ -299,6 +313,8 @@ export const useFormStorage = <T extends FieldValues>(
     save: async () => saveToStorage(form.getValues()),
     clear: async () => {
       cancelPendingSaveRef.current?.();
+      restoreIdRef.current += 1;
+      setIsLoading(false);
       // Queued, so a save issued before the clear cannot land after it.
       await enqueue(async () => {
         await storageAdapter.removeItem(key);
