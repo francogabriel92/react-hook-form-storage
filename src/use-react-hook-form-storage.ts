@@ -8,6 +8,9 @@ import {
 } from './utils';
 import { UseFormStorageOptions } from './types';
 
+// Longest wait for one storage call before the queue moves on.
+const WRITE_TIMEOUT_MS = 10_000;
+
 /**
  * A React hook that provides automatic storage synchronization for react-hook-form.
  * Saves form data to storage (localStorage by default) and restores it on component mount.
@@ -143,12 +146,15 @@ export const useFormStorage = <T extends FieldValues>(
       }
     };
 
+    // Resolves to whether the value was removed.
     const removeItem = async (key: string) => {
-      if (!resolvedStorage) return;
+      if (!resolvedStorage) return false;
       try {
-        return await resolvedStorage.removeItem(key);
+        await resolvedStorage.removeItem(key);
+        return true;
       } catch (error) {
         console.error(`[FORM-STORAGE] Failed to clear storage: ${error}`);
+        return false;
       }
     };
 
@@ -160,8 +166,25 @@ export const useFormStorage = <T extends FieldValues>(
   const writeChainRef = useRef<Promise<void>>(Promise.resolve());
 
   // Both branches: a rejection must not stall every later write.
+  // The timeout keeps one write that never settles from blocking the rest.
+  // ponytail: a timed-out write can still land later and undo a newer one.
   const enqueue = useCallback((mutate: () => Promise<void>) => {
-    const next = writeChainRef.current.then(mutate, mutate);
+    const run = () => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<void>((resolve) => {
+        timer = setTimeout(() => {
+          console.error(
+            `[FORM-STORAGE] A storage call took over ${WRITE_TIMEOUT_MS} ms. ` +
+              `Running the next one.`
+          );
+          resolve();
+        }, WRITE_TIMEOUT_MS);
+      });
+      return Promise.race([mutate(), timeout]).finally(() =>
+        clearTimeout(timer)
+      );
+    };
+    const next = writeChainRef.current.then(run, run);
     writeChainRef.current = next;
     return next;
   }, []);
@@ -302,7 +325,8 @@ export const useFormStorage = <T extends FieldValues>(
 
     return () => {
       subscription.unsubscribe();
-      debouncedHandleChange?.cancel();
+      // Saves the last edit now, so an unmount inside the debounce keeps it.
+      debouncedHandleChange?.flush();
       cancelPendingSaveRef.current = null;
     };
   }, [watch, debounce, autoSave]);
@@ -317,8 +341,7 @@ export const useFormStorage = <T extends FieldValues>(
       setIsLoading(false);
       // Queued, so a save issued before the clear cannot land after it.
       await enqueue(async () => {
-        await storageAdapter.removeItem(key);
-        setIsRestored(false);
+        if (await storageAdapter.removeItem(key)) setIsRestored(false);
       });
     },
     restore: async () => restoreDataFromStorage(),

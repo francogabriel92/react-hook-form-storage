@@ -334,15 +334,13 @@ describe('useFormStorage', () => {
     });
   });
 
-  it('Should cancel a pending debounced save on unmount', async () => {
-    jest.useFakeTimers();
-    const DEBOUNCE_TIME = 300;
+  it('Should save a pending debounced save on unmount', async () => {
     const onSaveMock = jest.fn();
 
     const { result, unmount } = renderHook(() => {
       const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
       const formStorage = useFormStorage(STORAGE_TEST_KEY, form, {
-        debounce: DEBOUNCE_TIME,
+        debounce: 300,
         onSave: onSaveMock,
       });
       return { form, formStorage };
@@ -353,15 +351,12 @@ describe('useFormStorage', () => {
     });
 
     unmount();
+    await act(() => new Promise((res) => setTimeout(res, 0)));
 
-    act(() => {
-      jest.advanceTimersByTime(DEBOUNCE_TIME * 2);
-    });
-
-    expect(onSaveMock).not.toHaveBeenCalled();
-    expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
-
-    jest.useRealTimers();
+    expect(onSaveMock).toHaveBeenCalledTimes(1);
+    expect(
+      JSON.parse(localStorage.getItem(STORAGE_TEST_KEY) ?? '{}').name
+    ).toBe(TEST_NAME);
   });
 
   it('Should apply serialization when saving values', async () => {
@@ -1017,5 +1012,51 @@ describe('useFormStorage 1.3.2 write ordering', () => {
     });
 
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('moves past a storage call that never settles', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    const storage = createMockRemoteStore({
+      delayMs: 0,
+      saveDelaysMs: [60_000],
+    });
+    const result = renderPlain({ storage });
+    let cleared = false;
+
+    await act(async () => {
+      void result.current.formStorage.save();
+      void result.current.formStorage.clear().then(() => {
+        cleared = true;
+      });
+      await jest.advanceTimersByTimeAsync(10_100);
+    });
+
+    expect(cleared).toBe(true);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('took over')
+    );
+  });
+
+  it('keeps isRestored when clear() fails', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    const storage = createMockRemoteStore({
+      delayMs: 0,
+      shouldFailClear: true,
+    });
+    await storage.setItem(
+      STORAGE_TEST_KEY,
+      JSON.stringify({ name: TEST_NAME })
+    );
+    const result = renderPlain({ storage, autoRestore: true });
+    await waitFor(() =>
+      expect(result.current.formStorage.isRestored).toBe(true)
+    );
+
+    await act(async () => {
+      await result.current.formStorage.clear();
+    });
+
+    expect(result.current.formStorage.isRestored).toBe(true);
   });
 });

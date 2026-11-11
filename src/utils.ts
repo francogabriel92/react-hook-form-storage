@@ -42,26 +42,38 @@ export const findNestedPaths = (paths?: string[]): string[] =>
  * Debounces a function call.
  * @param cb The function to debounce.
  * @param delay The delay in milliseconds.
- * @returns A debounced version of the function, with a `cancel` method that
- * discards any pending call.
+ * @returns A debounced version of the function. `cancel` discards the pending
+ * call. `flush` runs the pending call now.
  */
 export const debouncer = <T extends (...args: any[]) => any>(
   cb: T,
   delay: number
-): T & { cancel: () => void } => {
+): T & { cancel: () => void; flush: () => void } => {
   let timeout: ReturnType<typeof setTimeout> | null = null;
+  let pendingArgs: Parameters<T> | null = null;
+
+  const cancel = () => {
+    if (timeout) clearTimeout(timeout);
+    timeout = null;
+    pendingArgs = null;
+  };
+
+  const flush = () => {
+    const args = pendingArgs;
+    cancel();
+    if (args) cb(...args);
+  };
 
   const debounced = (...args: Parameters<T>) => {
     if (timeout) clearTimeout(timeout);
-    timeout = setTimeout(() => cb(...args), delay);
+    pendingArgs = args;
+    timeout = setTimeout(flush, delay);
   };
 
-  debounced.cancel = () => {
-    if (timeout) clearTimeout(timeout);
-    timeout = null;
+  return Object.assign(debounced, { cancel, flush }) as unknown as T & {
+    cancel: () => void;
+    flush: () => void;
   };
-
-  return debounced as unknown as T & { cancel: () => void };
 };
 
 /**
