@@ -4,6 +4,8 @@ module.exports = {
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   // Keeps an untracked local dev/ out of the testMatch globs below.
   roots: ['<rootDir>/src'],
+  // Catches tests that leak state into the next one.
+  randomize: true,
   testMatch: [
     '<rootDir>/**/__tests__/**/*.(ts|tsx|js)',
     '<rootDir>/**/?(*.)(spec|test).(ts|tsx|js)',

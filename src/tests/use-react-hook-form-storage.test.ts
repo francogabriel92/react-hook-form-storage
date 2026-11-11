@@ -58,6 +58,7 @@ const renderFormHook = async (
 };
 
 beforeEach(() => {
+  jest.useRealTimers();
   localStorage.clear();
   sessionStorage.clear();
   jest.clearAllMocks();
@@ -862,7 +863,7 @@ describe('useFormStorage', () => {
     expect(getValues('email')).toBe('');
 
     // Restore values manually
-    act(async () => {
+    await act(async () => {
       await formStorage.restore();
     });
 
