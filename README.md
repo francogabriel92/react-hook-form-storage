@@ -314,6 +314,44 @@ function ManualSaveForm() {
 }
 ```
 
+### Clearing the Draft After Submit
+
+The hook does not clear storage on submit. Call `clear()` in your submit handler.
+
+Call `reset()` before `clear()`. `reset()` changes the values, so it triggers an autosave. If `reset()` runs after `clear()`, that autosave stores the default values again.
+
+```typescript
+function CheckoutForm() {
+  const form = useForm<FormData>();
+  const { clear } = useFormStorage('checkout-form', form);
+
+  const onSubmit = async (data: FormData) => {
+    await sendOrder(data);
+    form.reset();
+    await clear();
+  };
+
+  return <form onSubmit={form.handleSubmit(onSubmit)}>{/* Form fields */}</form>;
+}
+```
+
+### Switching Keys
+
+The hook does not reset the form when `key` changes. If the new key holds no data, the form keeps the values from the previous key. The next autosave stores them under the new key.
+
+Remount the form when the key changes. Pass the same value as the React `key`:
+
+```typescript
+function UserDraft({ userId }: { userId: string }) {
+  const form = useForm<FormData>();
+  useFormStorage(`draft-${userId}`, form);
+  return <form>{/* Form fields */}</form>;
+}
+
+// The React key remounts UserDraft with a fresh form for each user.
+<UserDraft key={userId} userId={userId} />
+```
+
 ### Complex Data Serialization
 
 ```typescript

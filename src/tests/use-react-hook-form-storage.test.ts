@@ -1059,4 +1059,25 @@ describe('useFormStorage 1.3.2 write ordering', () => {
 
     expect(result.current.formStorage.isRestored).toBe(true);
   });
+
+  it.each([undefined, 50])(
+    'reset() then clear() leaves nothing stored (debounce %s)',
+    async (debounce) => {
+      const result = renderPlain({ debounce });
+
+      await act(async () => {
+        result.current.form.setValue('name', TEST_NAME);
+      });
+      await act(() => new Promise((res) => setTimeout(res, 100)));
+      expect(localStorage.getItem(STORAGE_TEST_KEY)).not.toBeNull();
+
+      await act(async () => {
+        result.current.form.reset();
+        await result.current.formStorage.clear();
+      });
+      await act(() => new Promise((res) => setTimeout(res, 100)));
+
+      expect(localStorage.getItem(STORAGE_TEST_KEY)).toBeNull();
+    }
+  );
 });
