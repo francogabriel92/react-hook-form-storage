@@ -827,7 +827,7 @@ describe('useFormStorage', () => {
         });
         return { form, formStorage };
       },
-      { initialProps: { excludedField: 'email' as const } }
+      { initialProps: { excludedField: 'email' as 'name' | 'email' } }
     );
 
     await act(async () => {
