@@ -1,4 +1,4 @@
-import type { UseFormStorageOptions } from './types';
+import type { UseFormStorageAdapter, UseFormStorageOptions } from './types';
 import { useFormStorage } from './use-react-hook-form-storage';
 
-export { useFormStorage, UseFormStorageOptions };
+export { useFormStorage, UseFormStorageAdapter, UseFormStorageOptions };
