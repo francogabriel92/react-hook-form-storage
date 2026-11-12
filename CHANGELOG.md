@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2]
+
+A stabilization release. No breaking changes.
+
+`clear()` now deletes after the writes queued before it. Await `clear()` before
+you read storage.
+
+### Fixed
+
+- **A debounced save could restore data after `clear()`.** The pending timer
+  fired after the clear and wrote the draft back. `clear()` now cancels it.
+- **A queued save could land after `clear()`.** With an async adapter, a save
+  issued before `clear()` could finish after the delete. `clear()` now waits in
+  the same write queue as saves.
+- **Concurrent `save()` calls could be dropped.** Only the newest queued write
+  ran, but every `save()` promise resolved. Only autosave coalesces now. An
+  explicit `save()` always runs.
+- **A write for one key could drop a queued write for another key.** Autosave
+  coalescing is now counted per key.
+- **`onSave` fired after a failed write.** It now fires only when the adapter
+  stored the value.
+- **`clear()` during a restore brought the data back.** A restore still reading
+  from a slow adapter applied the old values after the clear, and autosave
+  wrote them back. `clear()` now discards that restore.
+- **A stored value that is not an object added junk fields.** A stored `5`,
+  `"text"` or `[1,2]` set fields named `"0"`, `"1"` and marked the form as
+  restored. It now counts as no stored data.
+- **An unmount inside the debounce lost the last edit.** 1.3.1 cancelled the
+  pending save on unmount. The hook now saves it at unmount. `onSave` still
+  fires for that save.
+- **One storage call that never settled blocked every later write.** The queue
+  now moves on after 10 seconds and logs an error. The stalled call can still
+  land later.
+- **`clear()` reset `isRestored` when the delete failed.** The data stayed in
+  storage. `isRestored` now changes only when the delete succeeds.
+
+### Added
+
+- The package exports the `UseFormStorageAdapter` type. Use it to type a custom
+  `storage` adapter.
+
+### Internal
+
+- The test suite depended on test order. Fake timers leaked between tests and
+  one `act()` was not awaited. Jest now runs the suite in random order.
+- `npm run typecheck` now checks the test files. Adds `@types/react-dom`.
+
 ## [1.3.1]
 
 A robustness release. No API changes — every entry below is a bug fix for

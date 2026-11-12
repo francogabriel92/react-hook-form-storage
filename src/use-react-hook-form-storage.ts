@@ -8,6 +8,9 @@ import {
 } from './utils';
 import { UseFormStorageOptions } from './types';
 
+// Longest wait for one storage call before the queue moves on.
+const WRITE_TIMEOUT_MS = 10_000;
+
 /**
  * A React hook that provides automatic storage synchronization for react-hook-form.
  * Saves form data to storage (localStorage by default) and restores it on component mount.
@@ -117,16 +120,23 @@ export const useFormStorage = <T extends FieldValues>(
     const resolvedStorage =
       storage ?? (typeof window !== 'undefined' ? window.localStorage : null);
 
-    const setItem = async (key: string, value: string) => {
-      if (!resolvedStorage) return;
+    // Resolves to whether the call succeeded. onSave and clear() check it.
+    const attempt = async (call: () => unknown, failure: string) => {
+      if (!resolvedStorage) return false;
       try {
-        return await resolvedStorage.setItem(key, value);
+        await call();
+        return true;
       } catch (error) {
-        console.error(
-          `[FORM-STORAGE] Failed to save data to storage: ${error}`
-        );
+        console.error(`[FORM-STORAGE] Failed to ${failure}: ${error}`);
+        return false;
       }
     };
+
+    const setItem = (key: string, value: string) =>
+      attempt(
+        () => resolvedStorage?.setItem(key, value),
+        'save data to storage'
+      );
 
     const getItem = async (key: string) => {
       if (!resolvedStorage) return null;
@@ -140,31 +150,53 @@ export const useFormStorage = <T extends FieldValues>(
       }
     };
 
-    const removeItem = async (key: string) => {
-      if (!resolvedStorage) return;
-      try {
-        return await resolvedStorage.removeItem(key);
-      } catch (error) {
-        console.error(`[FORM-STORAGE] Failed to clear storage: ${error}`);
-      }
-    };
+    const removeItem = (key: string) =>
+      attempt(() => resolvedStorage?.removeItem(key), 'clear storage');
 
     return { setItem, getItem, removeItem };
   }, [storage]);
 
-  // Chained so writes reach an async adapter in issue order: otherwise a slow
-  // earlier write can resolve last and overwrite fresher values.
-  const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
-  const latestWriteRef = useRef(0);
+  // Chained so saves and clears reach an async adapter in issue order:
+  // otherwise a slow earlier one can resolve last and undo a newer one.
+  const writeChainRef = useRef<Promise<void>>(Promise.resolve());
+
+  // Both branches: a rejection must not stall every later write.
+  // The timeout keeps one write that never settles from blocking the rest.
+  // ponytail: a timed-out write can still land later and undo a newer one.
+  const enqueue = useCallback((mutate: () => Promise<void>) => {
+    const run = () => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<void>((resolve) => {
+        timer = setTimeout(() => {
+          console.error(
+            `[FORM-STORAGE] A storage call took over ${WRITE_TIMEOUT_MS} ms. ` +
+              `Running the next one.`
+          );
+          resolve();
+        }, WRITE_TIMEOUT_MS);
+      });
+      return Promise.race([mutate(), timeout]).finally(() =>
+        clearTimeout(timer)
+      );
+    };
+    const next = writeChainRef.current.then(run, run);
+    writeChainRef.current = next;
+    return next;
+  }, []);
+
+  // Per key, autosave only: a newer keystroke makes a queued older one
+  // pointless, but an explicit save() is awaited and must always run.
+  const latestAutosaveRef = useRef(new Map<string, number>());
 
   const saveToStorage = useCallback(
-    async (values: Record<string, any>) => {
+    async (values: Record<string, any>, autosave = false) => {
       const { included, excluded, serializer, onSave } = optionsRef.current;
-      const writeId = ++latestWriteRef.current;
+      const latest = latestAutosaveRef.current;
+      const writeId = (latest.get(key) ?? 0) + 1;
+      if (autosave) latest.set(key, writeId);
 
-      const write = async () => {
-        // Superseded while queued.
-        if (writeId < latestWriteRef.current) return;
+      return enqueue(async () => {
+        if (autosave && writeId < (latest.get(key) ?? 0)) return;
 
         try {
           const valuesToStore = filterIncludedOrExcludedFields(
@@ -173,22 +205,25 @@ export const useFormStorage = <T extends FieldValues>(
             excluded
           );
           const serialized = transformValues(valuesToStore, serializer as any);
-          await storageAdapter.setItem(key, JSON.stringify(serialized));
-          onSave?.(valuesToStore);
+          const stored = await storageAdapter.setItem(
+            key,
+            JSON.stringify(serialized)
+          );
+          if (stored) onSave?.(valuesToStore);
         } catch (error) {
           console.error(`[FORM-STORAGE] Failed to save data: ${error}`);
         }
-      };
-
-      // Both branches: a rejection must not stall every later write.
-      const next = writeChainRef.current.then(write, write);
-      writeChainRef.current = next;
-      return next;
+      });
     },
-    [key, storageAdapter]
+    [key, storageAdapter, enqueue]
   );
 
+  // Bumped by every restore and by clear(): a restore whose read resolves
+  // after a newer restore or a clear must not apply stale values.
+  const restoreIdRef = useRef(0);
+
   const restoreDataFromStorage = useCallback(async () => {
+    const restoreId = ++restoreIdRef.current;
     const {
       included,
       excluded,
@@ -201,8 +236,13 @@ export const useFormStorage = <T extends FieldValues>(
     setIsLoading(true);
     try {
       const storedValue = await storageAdapter.getItem(key);
+      if (restoreId !== restoreIdRef.current) return;
       if (storedValue) {
-        const parsedValue = JSON.parse(storedValue) as FieldValues;
+        const parsedValue = JSON.parse(storedValue);
+        // Anything else would spread into junk fields such as "0" and "1".
+        if (parsedValue?.constructor !== Object) {
+          throw new Error('the stored value is not an object');
+        }
 
         const valuesToRestore = filterIncludedOrExcludedFields(
           parsedValue,
@@ -235,7 +275,7 @@ export const useFormStorage = <T extends FieldValues>(
         `[FORM-STORAGE] Failed to restore data from storage: ${error}`
       );
     } finally {
-      setIsLoading(false);
+      if (restoreId === restoreIdRef.current) setIsLoading(false);
     }
   }, [key, storageAdapter, setValue]);
 
@@ -257,21 +297,28 @@ export const useFormStorage = <T extends FieldValues>(
     saveToStorageRef.current = saveToStorage;
   }, [saveToStorage]);
 
+  // Lets clear() cancel a pending debounced save, which would otherwise fire
+  // after the clear and write the data back.
+  const cancelPendingSaveRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     if (!autoSave) return;
 
     const handleChange = (values: Record<string, any>) =>
-      saveToStorageRef.current(values);
+      saveToStorageRef.current(values, true);
 
     const debouncedHandleChange = debounce
       ? debouncer(handleChange, debounce)
       : null;
+    cancelPendingSaveRef.current = debouncedHandleChange?.cancel ?? null;
 
     const subscription = watch(debouncedHandleChange ?? handleChange);
 
     return () => {
       subscription.unsubscribe();
-      debouncedHandleChange?.cancel();
+      // Saves the last edit now, so an unmount inside the debounce keeps it.
+      debouncedHandleChange?.flush();
+      cancelPendingSaveRef.current = null;
     };
   }, [watch, debounce, autoSave]);
 
@@ -280,8 +327,13 @@ export const useFormStorage = <T extends FieldValues>(
     isLoading,
     save: async () => saveToStorage(form.getValues()),
     clear: async () => {
-      await storageAdapter.removeItem(key);
-      setIsRestored(false);
+      cancelPendingSaveRef.current?.();
+      restoreIdRef.current += 1;
+      setIsLoading(false);
+      // Queued, so a save issued before the clear cannot land after it.
+      await enqueue(async () => {
+        if (await storageAdapter.removeItem(key)) setIsRestored(false);
+      });
     },
     restore: async () => restoreDataFromStorage(),
   };
