@@ -8,7 +8,7 @@ import {
   jest,
 } from '@jest/globals';
 import { act, render, renderHook } from '@testing-library/react';
-import { createElement } from 'react';
+import { createElement, useEffect } from 'react';
 import { useForm, UseFormReturn } from 'react-hook-form';
 import { UseFormStorageOptions } from '../types';
 import { useFormStorage } from '../use-react-hook-form-storage';
@@ -244,6 +244,56 @@ for (const [mode, enabled] of MODES) {
       await settle();
       expect(stored().name).toBe('from-b');
     });
+
+    // RHF 8.0.0-beta.0 shares one formState filter between subscribe() callers:
+    // a subscriber registered first makes ours fire on non-value updates.
+    (HAS_SUBSCRIBE ? it : it.skip)(
+      'ignores state that an earlier subscriber on the form listens to',
+      async () => {
+        const { result } = renderHook(() => {
+          const form = useForm({ defaultValues: DEFAULT_VALUES });
+          useEffect(
+            () =>
+              form.subscribe({
+                formState: {
+                  errors: true,
+                  touchedFields: true,
+                  isDirty: true,
+                  isSubmitting: true,
+                  isSubmitted: true,
+                } as any,
+                callback: () => {},
+              }),
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+            []
+          );
+          const formStorage = useFormStorage(KEY, wrapForm(mode, form));
+          return { form, formStorage };
+        });
+        await settle();
+        const { form, formStorage } = result.current;
+
+        act(() => form.setValue('name', 'x'));
+        await settle();
+        expect(setItemSpy).toHaveBeenCalledTimes(1);
+
+        act(() => {
+          form.setError('name', { message: 'e' });
+          form.clearErrors();
+        });
+        await settle();
+        expect(setItemSpy).toHaveBeenCalledTimes(1);
+
+        await act(() =>
+          form.handleSubmit(async () => {
+            form.reset();
+            await formStorage.clear();
+          })()
+        );
+        await settle(DEBOUNCE);
+        expect(localStorage.getItem(KEY)).toBeNull();
+      }
+    );
 
     it('does not save when autoSave is false', async () => {
       const { result } = renderMode(mode, { autoSave: false });

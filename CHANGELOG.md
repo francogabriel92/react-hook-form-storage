@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   7.54 keeps the `watch` callback.
 - The peer range accepts v8 prereleases: `>=7.0.0 || >=8.0.0-0`.
 
+### Changed
+
+- **Autosave skips a write identical to the last write for the key.**
+  `form.subscribe` can fire with unchanged values: on RHF 7.55, and on RHF 8
+  beta when the form has another subscriber. Such an update wrote the draft back
+  after `clear()`. An explicit `save()` always writes.
+
 ### Fixed
 
 - **Autosave resubscribed on every render with RHF v8.** RHF v8 no longer keeps

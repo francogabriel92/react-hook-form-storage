@@ -188,6 +188,12 @@ export const useFormStorage = <T extends FieldValues>(
   // pointless, but an explicit save() is awaited and must always run.
   const latestAutosaveRef = useRef(new Map<string, number>());
 
+  // Per key, the last JSON written. form.subscribe can fire with unchanged
+  // values (RHF 7.55, and RHF 8 beta next to another subscriber). Autosave
+  // skips those, or a state-only update would write the draft back after
+  // clear(). So clear() keeps the entry.
+  const lastSavedRef = useRef(new Map<string, string>());
+
   const saveToStorage = useCallback(
     async (values: FieldValues, autosave = false) => {
       const { included, excluded, serializer, onSave } = optionsRef.current;
@@ -205,11 +211,13 @@ export const useFormStorage = <T extends FieldValues>(
             excluded
           );
           const serialized = transformValues(valuesToStore, serializer);
-          const stored = await storageAdapter.setItem(
-            key,
-            JSON.stringify(serialized)
-          );
-          if (stored) onSave?.(valuesToStore);
+          const json = JSON.stringify(serialized);
+          if (autosave && json === lastSavedRef.current.get(key)) return;
+
+          const stored = await storageAdapter.setItem(key, json);
+          if (!stored) return;
+          lastSavedRef.current.set(key, json);
+          onSave?.(valuesToStore);
         } catch (error) {
           console.error(`[FORM-STORAGE] Failed to save data: ${error}`);
         }
