@@ -72,8 +72,7 @@ export const debouncer = <A extends unknown[]>(
   return Object.assign(debounced, { cancel, flush });
 };
 
-// A Serializer for any field: `never` parameters accept every field type.
-type FieldTransforms = {
+type SerializerOfAnyField = {
   serialize?: (value: never) => unknown;
   deserialize?: (value: never) => unknown;
 };
@@ -87,7 +86,7 @@ type FieldTransforms = {
  */
 export const transformValues = <T extends FieldValues>(
   values: T,
-  serializer: Partial<Record<string, FieldTransforms>> = {},
+  serializer: Partial<Record<string, SerializerOfAnyField>> = {},
   deserialize = false
 ): Partial<T> => {
   const entries = Object.entries(values) as [Path<T>, unknown][];

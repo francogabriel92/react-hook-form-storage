@@ -21,19 +21,20 @@ const DEBOUNCE = 300;
 
 type Mode = 'v8' | 'legacy' | 'native';
 
-// Probe once which contracts the installed RHF supports.
-const probe = renderHook(() => useForm({ defaultValues: DEFAULT_VALUES }));
-const probeForm = probe.result.current as any;
-const HAS_SUBSCRIBE = typeof probeForm.subscribe === 'function';
+const installedRhf = renderHook(() =>
+  useForm({ defaultValues: DEFAULT_VALUES })
+);
+const installedRhfForm = installedRhf.result.current as any;
+const HAS_SUBSCRIBE = typeof installedRhfForm.subscribe === 'function';
 const HAS_WATCH_CALLBACK = (() => {
   try {
-    probeForm.watch(() => {}).unsubscribe();
+    installedRhfForm.watch(() => {}).unsubscribe();
     return true;
   } catch {
     return false;
   }
 })();
-probe.unmount();
+installedRhf.unmount();
 
 const MODES: [Mode, boolean][] = [
   ['v8', HAS_SUBSCRIBE],
@@ -41,9 +42,7 @@ const MODES: [Mode, boolean][] = [
   ['native', true],
 ];
 
-// Simulates the v8 and legacy contracts on top of the real form, with new
-// function identities on every call, as RHF v8 has on every render.
-const wrapForm = (mode: Mode, form: any): any => {
+const simulateRhfContract = (mode: Mode, form: any): any => {
   if (mode === 'native') return form;
 
   const realSubscribe =
@@ -70,12 +69,15 @@ const renderMode = (
 ) =>
   renderHook(() => {
     const form = useForm({ defaultValues: DEFAULT_VALUES, ...formOptions });
-    const formStorage = useFormStorage(KEY, wrapForm(mode, form), options);
+    const formStorage = useFormStorage(
+      KEY,
+      simulateRhfContract(mode, form),
+      options
+    );
     return { form, formStorage };
   });
 
-// Lets queued storage writes and debounce timers run.
-const settle = (ms = 0) =>
+const runTimersAndQueuedWrites = (ms = 0) =>
   act(async () => {
     await jest.advanceTimersByTimeAsync(ms);
   });
@@ -99,24 +101,24 @@ for (const [mode, enabled] of MODES) {
   (enabled ? describe : describe.skip)(`RHF compat (${mode})`, () => {
     it('autosaves on setValue', async () => {
       const { result } = renderMode(mode);
-      await settle();
+      await runTimersAndQueuedWrites();
 
       act(() => result.current.form.setValue('name', 'x'));
-      await settle();
+      await runTimersAndQueuedWrites();
 
       expect(stored().name).toBe('x');
     });
 
     it('debounces several changes into one save with the last value', async () => {
       const { result } = renderMode(mode, { debounce: DEBOUNCE });
-      await settle();
+      await runTimersAndQueuedWrites();
 
       act(() => {
         result.current.form.setValue('name', 'a');
         result.current.form.setValue('name', 'b');
         result.current.form.setValue('name', 'c');
       });
-      await settle(DEBOUNCE);
+      await runTimersAndQueuedWrites(DEBOUNCE);
 
       expect(setItemSpy).toHaveBeenCalledTimes(1);
       expect(stored().name).toBe('c');
@@ -124,34 +126,34 @@ for (const [mode, enabled] of MODES) {
 
     it('keeps the pending debounce across rerenders with unstable references', async () => {
       const { result, rerender } = renderMode(mode, { debounce: DEBOUNCE });
-      await settle();
+      await runTimersAndQueuedWrites();
 
       act(() => result.current.form.setValue('name', 'x'));
       rerender();
       rerender();
       rerender();
-      await settle();
+      await runTimersAndQueuedWrites();
       expect(setItemSpy).not.toHaveBeenCalled();
 
-      await settle(DEBOUNCE);
+      await runTimersAndQueuedWrites(DEBOUNCE);
       expect(setItemSpy).toHaveBeenCalledTimes(1);
       expect(stored().name).toBe('x');
     });
 
     it('flushes a pending debounced save on unmount', async () => {
       const { result, unmount } = renderMode(mode, { debounce: DEBOUNCE });
-      await settle();
+      await runTimersAndQueuedWrites();
 
       act(() => result.current.form.setValue('name', 'x'));
       unmount();
-      await settle();
+      await runTimersAndQueuedWrites();
 
       expect(stored().name).toBe('x');
     });
 
     it('autosaves on a change event from a registered input', async () => {
       const { result } = renderMode(mode);
-      await settle();
+      await runTimersAndQueuedWrites();
 
       await act(() =>
         result.current.form.register('name').onChange({
@@ -159,7 +161,7 @@ for (const [mode, enabled] of MODES) {
           type: 'change',
         })
       );
-      await settle();
+      await runTimersAndQueuedWrites();
 
       expect(stored().name).toBe('typed');
     });
@@ -168,7 +170,7 @@ for (const [mode, enabled] of MODES) {
       'saves once per change event and never on blur (validation mode %s)',
       async (validationMode) => {
         const { result } = renderMode(mode, {}, { mode: validationMode });
-        await settle();
+        await runTimersAndQueuedWrites();
 
         const field = result.current.form.register('name');
         const fire = (type: 'change' | 'blur', value: string) =>
@@ -180,31 +182,32 @@ for (const [mode, enabled] of MODES) {
           );
 
         await fire('change', 'a');
-        await settle();
+        await runTimersAndQueuedWrites();
         await fire('change', 'ab');
-        await settle();
+        await runTimersAndQueuedWrites();
         expect(setItemSpy).toHaveBeenCalledTimes(2);
 
         await fire('blur', 'ab');
-        await settle();
+        await runTimersAndQueuedWrites();
         await fire('blur', 'ab');
-        await settle();
+        await runTimersAndQueuedWrites();
         expect(setItemSpy).toHaveBeenCalledTimes(2);
         expect(stored().name).toBe('ab');
       }
     );
 
-    it('restores the same values when the hook lives in a child component', async () => {
+    it('restores the same values when a child component subscribes before useForm mounts', async () => {
       localStorage.setItem(KEY, JSON.stringify({ name: 'saved' }));
       setItemSpy.mockClear();
 
       const seen = {} as { form: UseFormReturn<Values>; isRestored: boolean };
-      // Lint forbids writing to outer variables directly during render.
       const report = (patch: Partial<typeof seen>) =>
         Object.assign(seen, patch);
-      // The child effect runs before the parent useForm effect.
       const Child = (props: { form: UseFormReturn<Values> }) => {
-        const { isRestored } = useFormStorage(KEY, wrapForm(mode, props.form));
+        const { isRestored } = useFormStorage(
+          KEY,
+          simulateRhfContract(mode, props.form)
+        );
         report({ isRestored });
         return null;
       };
@@ -214,7 +217,7 @@ for (const [mode, enabled] of MODES) {
         return createElement(Child, { form });
       };
       render(createElement(Parent));
-      await settle(DEBOUNCE);
+      await runTimersAndQueuedWrites(DEBOUNCE);
 
       expect(seen.isRestored).toBe(true);
       expect(seen.form.getValues()).toEqual({ name: 'saved', email: '' });
@@ -227,28 +230,26 @@ for (const [mode, enabled] of MODES) {
         ({ useB }: { useB: boolean }) => {
           const a = useForm({ defaultValues: DEFAULT_VALUES });
           const b = useForm({ defaultValues: DEFAULT_VALUES });
-          useFormStorage(KEY, wrapForm(mode, useB ? b : a));
+          useFormStorage(KEY, simulateRhfContract(mode, useB ? b : a));
           return { a, b };
         },
         { initialProps: { useB: false } }
       );
-      await settle();
+      await runTimersAndQueuedWrites();
       rerender({ useB: true });
-      await settle();
+      await runTimersAndQueuedWrites();
 
       act(() => result.current.b.setValue('name', 'from-b'));
-      await settle();
+      await runTimersAndQueuedWrites();
       expect(stored().name).toBe('from-b');
 
       act(() => result.current.a.setValue('name', 'from-a'));
-      await settle();
+      await runTimersAndQueuedWrites();
       expect(stored().name).toBe('from-b');
     });
 
-    // RHF 8.0.0-beta.0 shares one formState filter between subscribe() callers:
-    // a subscriber registered first makes ours fire on non-value updates.
     (HAS_SUBSCRIBE ? it : it.skip)(
-      'ignores state that an earlier subscriber on the form listens to',
+      'does not save on state that an earlier form.subscribe() caller listens to',
       async () => {
         const { result } = renderHook(() => {
           const form = useForm({ defaultValues: DEFAULT_VALUES });
@@ -267,21 +268,24 @@ for (const [mode, enabled] of MODES) {
             // eslint-disable-next-line react-hooks/exhaustive-deps
             []
           );
-          const formStorage = useFormStorage(KEY, wrapForm(mode, form));
+          const formStorage = useFormStorage(
+            KEY,
+            simulateRhfContract(mode, form)
+          );
           return { form, formStorage };
         });
-        await settle();
+        await runTimersAndQueuedWrites();
         const { form, formStorage } = result.current;
 
         act(() => form.setValue('name', 'x'));
-        await settle();
+        await runTimersAndQueuedWrites();
         expect(setItemSpy).toHaveBeenCalledTimes(1);
 
         act(() => {
           form.setError('name', { message: 'e' });
           form.clearErrors();
         });
-        await settle();
+        await runTimersAndQueuedWrites();
         expect(setItemSpy).toHaveBeenCalledTimes(1);
 
         await act(() =>
@@ -290,17 +294,17 @@ for (const [mode, enabled] of MODES) {
             await formStorage.clear();
           })()
         );
-        await settle(DEBOUNCE);
+        await runTimersAndQueuedWrites(DEBOUNCE);
         expect(localStorage.getItem(KEY)).toBeNull();
       }
     );
 
     it('does not save when autoSave is false', async () => {
       const { result } = renderMode(mode, { autoSave: false });
-      await settle();
+      await runTimersAndQueuedWrites();
 
       act(() => result.current.form.setValue('name', 'x'));
-      await settle(DEBOUNCE);
+      await runTimersAndQueuedWrites(DEBOUNCE);
 
       expect(setItemSpy).not.toHaveBeenCalled();
       expect(localStorage.getItem(KEY)).toBeNull();
@@ -308,19 +312,19 @@ for (const [mode, enabled] of MODES) {
 
     it('does not save on mount', async () => {
       renderMode(mode);
-      await settle(DEBOUNCE);
+      await runTimersAndQueuedWrites(DEBOUNCE);
 
       expect(setItemSpy).not.toHaveBeenCalled();
     });
 
     it('saves the values set by reset()', async () => {
       const { result } = renderMode(mode);
-      await settle();
+      await runTimersAndQueuedWrites();
 
       act(() =>
         result.current.form.reset({ ...DEFAULT_VALUES, name: 'after-reset' })
       );
-      await settle(DEBOUNCE);
+      await runTimersAndQueuedWrites(DEBOUNCE);
 
       expect(stored().name).toBe('after-reset');
     });
@@ -329,10 +333,10 @@ for (const [mode, enabled] of MODES) {
       'leaves nothing stored after clear() inside submit (debounce %s)',
       async (debounce) => {
         const { result } = renderMode(mode, { debounce });
-        await settle();
+        await runTimersAndQueuedWrites();
 
         act(() => result.current.form.setValue('name', 'x'));
-        await settle(DEBOUNCE);
+        await runTimersAndQueuedWrites(DEBOUNCE);
         expect(stored().name).toBe('x');
 
         await act(() =>
@@ -340,7 +344,7 @@ for (const [mode, enabled] of MODES) {
             await result.current.formStorage.clear();
           })()
         );
-        await settle(DEBOUNCE);
+        await runTimersAndQueuedWrites(DEBOUNCE);
 
         expect(localStorage.getItem(KEY)).toBeNull();
       }
@@ -348,17 +352,17 @@ for (const [mode, enabled] of MODES) {
 
     it('does not save on state updates that leave values unchanged', async () => {
       const { result } = renderMode(mode);
-      await settle();
+      await runTimersAndQueuedWrites();
 
       act(() => result.current.form.setValue('name', 'x'));
-      await settle();
+      await runTimersAndQueuedWrites();
       const callsBefore = setItemSpy.mock.calls.length;
 
       act(() => {
         result.current.form.setError('name', { message: 'e' });
         result.current.form.clearErrors();
       });
-      await settle(DEBOUNCE);
+      await runTimersAndQueuedWrites(DEBOUNCE);
 
       expect(setItemSpy).toHaveBeenCalledTimes(callsBefore);
     });

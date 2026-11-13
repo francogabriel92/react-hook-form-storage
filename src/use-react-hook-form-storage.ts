@@ -8,6 +8,10 @@ import {
 } from './utils';
 import { UseFormStorageOptions } from './types';
 
+type WatchWithCallbackBeforeRhf8 = (
+  callback: (values: FieldValues) => void
+) => { unsubscribe: () => void };
+
 // Longest wait for one storage call before the queue moves on.
 const WRITE_TIMEOUT_MS = 10_000;
 
@@ -188,11 +192,9 @@ export const useFormStorage = <T extends FieldValues>(
   // pointless, but an explicit save() is awaited and must always run.
   const latestAutosaveRef = useRef(new Map<string, number>());
 
-  // Per key, the last JSON written. form.subscribe can fire with unchanged
-  // values (RHF 7.55, and RHF 8 beta next to another subscriber). Autosave
-  // skips those, or a state-only update would write the draft back after
-  // clear(). So clear() keeps the entry.
-  const lastSavedRef = useRef(new Map<string, string>());
+  // Survives clear(): RHF can re-emit unchanged values, which must not
+  // write the cleared draft back.
+  const lastWrittenJsonByKeyRef = useRef(new Map<string, string>());
 
   const saveToStorage = useCallback(
     async (values: FieldValues, autosave = false) => {
@@ -212,11 +214,12 @@ export const useFormStorage = <T extends FieldValues>(
           );
           const serialized = transformValues(valuesToStore, serializer);
           const json = JSON.stringify(serialized);
-          if (autosave && json === lastSavedRef.current.get(key)) return;
+          const isUnchanged = json === lastWrittenJsonByKeyRef.current.get(key);
+          if (autosave && isUnchanged) return;
 
           const stored = await storageAdapter.setItem(key, json);
           if (!stored) return;
-          lastSavedRef.current.set(key, json);
+          lastWrittenJsonByKeyRef.current.set(key, json);
           onSave?.(valuesToStore);
         } catch (error) {
           console.error(`[FORM-STORAGE] Failed to save data: ${error}`);
@@ -320,17 +323,13 @@ export const useFormStorage = <T extends FieldValues>(
     cancelPendingSaveRef.current = debouncedHandleChange?.cancel ?? null;
 
     const listener = debouncedHandleChange ?? handleChange;
-    // RHF v8 removed watch(callback). RHF < 7.55 has no subscribe.
     const unsubscribe = form.subscribe
       ? form.subscribe({
           formState: { values: true },
           callback: ({ values }) => listener(values),
         })
-      : (
-          form.watch as unknown as (cb: typeof listener) => {
-            unsubscribe: () => void;
-          }
-        )(listener).unsubscribe;
+      : (form.watch as unknown as WatchWithCallbackBeforeRhf8)(listener)
+          .unsubscribe;
 
     return () => {
       unsubscribe();
@@ -338,9 +337,7 @@ export const useFormStorage = <T extends FieldValues>(
       debouncedHandleChange?.flush();
       cancelPendingSaveRef.current = null;
     };
-    // Keyed on form.control, not watch: RHF v8 no longer keeps watch stable,
-    // so depending on it would resubscribe and flush the debounce every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- form.control identifies the form; RHF v8 recreates watch on every render
   }, [form.control, debounce, autoSave]);
 
   return {
