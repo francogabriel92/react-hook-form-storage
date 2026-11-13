@@ -348,6 +348,37 @@ describe('autosave skips only a write it already made', () => {
       form.setValue('name', 'x');
     });
 
+  it('does not write the draft back when the form re-emits unchanged values after clear()', async () => {
+    let emit: (values: Values) => void = () => {};
+    const { result } = renderHook(() => {
+      const form = useForm({ defaultValues: DEFAULT_VALUES });
+      const formWithControlledEmissions = {
+        ...form,
+        subscribe: (props: {
+          callback: (state: { values: Values }) => void;
+        }) => {
+          emit = (values) => props.callback({ values });
+          return () => {};
+        },
+      };
+      return useFormStorage(KEY, formWithControlledEmissions as any);
+    });
+    await runTimersAndQueuedWrites();
+
+    emit({ name: 'x', email: '' });
+    await runTimersAndQueuedWrites();
+    expect(stored().name).toBe('x');
+
+    await act(() => result.current.clear());
+    emit({ name: 'x', email: '' });
+    await runTimersAndQueuedWrites();
+    expect(localStorage.getItem(KEY)).toBeNull();
+
+    emit({ name: 'xy', email: '' });
+    await runTimersAndQueuedWrites();
+    expect(stored().name).toBe('xy');
+  });
+
   it('writes the same values again under a new key', async () => {
     const { result, rerender } = renderHook(
       ({ storageKey }: { storageKey: string }) => {
