@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `form.subscribe` can fire with unchanged values: on RHF 7.55, and on RHF 8
   beta when the form has another subscriber. Such an update wrote the draft back
   after `clear()`. An explicit `save()` always writes.
+  After `clear()`, an edit that ends on the last saved values is not saved.
+  The next different edit is saved.
+- **`serialize` returns `unknown` instead of `any`** in the serializer types.
+  A serializer written for 1.3.2 still compiles.
 
 ### Fixed
 
