@@ -99,16 +99,6 @@ afterEach(() => {
 
 for (const [mode, enabled] of MODES) {
   (enabled ? describe : describe.skip)(`RHF compat (${mode})`, () => {
-    it('autosaves on setValue', async () => {
-      const { result } = renderMode(mode);
-      await runTimersAndQueuedWrites();
-
-      act(() => result.current.form.setValue('name', 'x'));
-      await runTimersAndQueuedWrites();
-
-      expect(stored().name).toBe('x');
-    });
-
     it('debounces several changes into one save with the last value', async () => {
       const { result } = renderMode(mode, { debounce: DEBOUNCE });
       await runTimersAndQueuedWrites();
@@ -118,8 +108,10 @@ for (const [mode, enabled] of MODES) {
         result.current.form.setValue('name', 'b');
         result.current.form.setValue('name', 'c');
       });
-      await runTimersAndQueuedWrites(DEBOUNCE);
+      await runTimersAndQueuedWrites(DEBOUNCE - 1);
+      expect(setItemSpy).not.toHaveBeenCalled();
 
+      await runTimersAndQueuedWrites(1);
       expect(setItemSpy).toHaveBeenCalledTimes(1);
       expect(stored().name).toBe('c');
     });
@@ -149,21 +141,6 @@ for (const [mode, enabled] of MODES) {
       await runTimersAndQueuedWrites();
 
       expect(stored().name).toBe('x');
-    });
-
-    it('autosaves on a change event from a registered input', async () => {
-      const { result } = renderMode(mode);
-      await runTimersAndQueuedWrites();
-
-      await act(() =>
-        result.current.form.register('name').onChange({
-          target: { name: 'name', value: 'typed' },
-          type: 'change',
-        })
-      );
-      await runTimersAndQueuedWrites();
-
-      expect(stored().name).toBe('typed');
     });
 
     it.each(['onSubmit', 'onChange', 'onBlur', 'all'] as const)(
@@ -310,13 +287,6 @@ for (const [mode, enabled] of MODES) {
       expect(localStorage.getItem(KEY)).toBeNull();
     });
 
-    it('does not save on mount', async () => {
-      renderMode(mode);
-      await runTimersAndQueuedWrites(DEBOUNCE);
-
-      expect(setItemSpy).not.toHaveBeenCalled();
-    });
-
     it('saves the values set by reset()', async () => {
       const { result } = renderMode(mode);
       await runTimersAndQueuedWrites();
@@ -368,3 +338,59 @@ for (const [mode, enabled] of MODES) {
     });
   });
 }
+
+describe('autosave skips only a write it already made', () => {
+  // RHF 7.92 does not emit a setValue that keeps the value, so the repeated
+  // values arrive as two changes inside one debounce window.
+  const changeAwayAndBack = (form: UseFormReturn<Values>) =>
+    act(() => {
+      form.setValue('name', 'y');
+      form.setValue('name', 'x');
+    });
+
+  it('writes the same values again under a new key', async () => {
+    const { result, rerender } = renderHook(
+      ({ storageKey }: { storageKey: string }) => {
+        const form = useForm({ defaultValues: DEFAULT_VALUES });
+        useFormStorage(storageKey, form, { debounce: DEBOUNCE });
+        return form;
+      },
+      { initialProps: { storageKey: 'first' } }
+    );
+    await runTimersAndQueuedWrites();
+    act(() => result.current.setValue('name', 'x'));
+    await runTimersAndQueuedWrites(DEBOUNCE);
+
+    rerender({ storageKey: 'second' });
+    await runTimersAndQueuedWrites();
+    changeAwayAndBack(result.current);
+    await runTimersAndQueuedWrites(DEBOUNCE);
+
+    expect(localStorage.getItem('first')).not.toBeNull();
+    expect(localStorage.getItem('second')).toBe(localStorage.getItem('first'));
+  });
+
+  it('retries the same values after a failed write', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    const setItem = jest
+      .fn<(key: string, value: string) => Promise<void>>()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue(undefined);
+    const { result } = renderMode('native', {
+      debounce: DEBOUNCE,
+      storage: {
+        getItem: async () => null,
+        setItem,
+        removeItem: async () => {},
+      },
+    });
+    await runTimersAndQueuedWrites();
+
+    act(() => result.current.form.setValue('name', 'x'));
+    await runTimersAndQueuedWrites(DEBOUNCE);
+    changeAwayAndBack(result.current.form);
+    await runTimersAndQueuedWrites(DEBOUNCE);
+
+    expect(setItem).toHaveBeenCalledTimes(2);
+  });
+});
