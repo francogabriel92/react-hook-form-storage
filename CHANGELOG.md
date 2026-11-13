@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0]
+
+### Added
+
+- **React Hook Form v8 support.** RHF v8 removes the `watch` callback. Autosave
+  now uses `form.subscribe` when the form has it (RHF 7.55 or later). RHF 7.0 to
+  7.54 keeps the `watch` callback.
+- The peer range accepts v8 prereleases: `>=7.0.0 || >=8.0.0-0`.
+
+### Changed
+
+- **Autosave skips a write identical to the last write for the key.**
+  `form.subscribe` can fire with unchanged values: on RHF 7.55, and on RHF 8
+  beta when the form has another subscriber. Such an update wrote the draft back
+  after `clear()`. An explicit `save()` always writes.
+  After `clear()`, an edit that ends on the last saved values is not saved.
+  The next different edit is saved.
+- **`serialize` returns `unknown` instead of `any`** in the serializer types.
+  A serializer written for 1.3.2 still compiles.
+
+### Fixed
+
+- **Autosave resubscribed on every render with RHF v8.** RHF v8 no longer keeps
+  `watch` stable between renders. Each render flushed the pending debounced
+  save. The subscription now follows the form instance.
+
 ## [1.3.2]
 
 A stabilization release. No breaking changes.

@@ -1,7 +1,8 @@
 import type { FieldValues, Path } from 'react-hook-form';
 
 export type Serializer<T, K extends keyof T> = {
-  serialize?: (value: T[K]) => any;
+  serialize?: (value: T[K]) => unknown;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- public API: callers type the stored value themselves
   deserialize?: (value: any) => T[K];
 };
 
@@ -13,8 +14,8 @@ export type UseFormStorageAdapter = {
 
 type UseFormStorageBaseOptions<T extends FieldValues> = {
   storage?: Storage | UseFormStorageAdapter;
-  onRestore?: (values: Record<string, any>) => void;
-  onSave?: (values: Record<string, any>) => void;
+  onRestore?: (values: FieldValues) => void;
+  onSave?: (values: FieldValues) => void;
   debounce?: number;
   validate?: boolean;
   dirty?: boolean;
@@ -28,11 +29,13 @@ type UseFormStorageBaseOptions<T extends FieldValues> = {
 
 type IncludedOptions<T extends FieldValues, K extends Path<T>[]> = {
   included: K;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- public API: narrowing it would reject options accepted today
   excluded?: any;
 };
 
 type ExcludedOptions<T extends FieldValues, K extends Path<T>[]> = {
   excluded: K;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- public API: narrowing it would reject options accepted today
   included?: any;
 };
 

@@ -8,6 +8,10 @@ import {
 } from './utils';
 import { UseFormStorageOptions } from './types';
 
+type WatchWithCallbackBeforeRhf8 = (
+  callback: (values: FieldValues) => void
+) => { unsubscribe: () => void };
+
 // Longest wait for one storage call before the queue moves on.
 const WRITE_TIMEOUT_MS = 10_000;
 
@@ -73,7 +77,7 @@ export const useFormStorage = <T extends FieldValues>(
   const [isRestored, setIsRestored] = useState(false);
   const [isLoading, setIsLoading] = useState(autoRestore);
 
-  const { setValue, watch } = form;
+  const { setValue } = form;
 
   // Read through a ref, not deps: these are passed as inline literals, so
   // depending on them would recreate the callbacks and subscription every render.
@@ -188,8 +192,12 @@ export const useFormStorage = <T extends FieldValues>(
   // pointless, but an explicit save() is awaited and must always run.
   const latestAutosaveRef = useRef(new Map<string, number>());
 
+  // Survives clear(): RHF can re-emit unchanged values, which must not
+  // write the cleared draft back.
+  const lastWrittenJsonByKeyRef = useRef(new Map<string, string>());
+
   const saveToStorage = useCallback(
-    async (values: Record<string, any>, autosave = false) => {
+    async (values: FieldValues, autosave = false) => {
       const { included, excluded, serializer, onSave } = optionsRef.current;
       const latest = latestAutosaveRef.current;
       const writeId = (latest.get(key) ?? 0) + 1;
@@ -204,12 +212,15 @@ export const useFormStorage = <T extends FieldValues>(
             included,
             excluded
           );
-          const serialized = transformValues(valuesToStore, serializer as any);
-          const stored = await storageAdapter.setItem(
-            key,
-            JSON.stringify(serialized)
-          );
-          if (stored) onSave?.(valuesToStore);
+          const serialized = transformValues(valuesToStore, serializer);
+          const json = JSON.stringify(serialized);
+          const isUnchanged = json === lastWrittenJsonByKeyRef.current.get(key);
+          if (autosave && isUnchanged) return;
+
+          const stored = await storageAdapter.setItem(key, json);
+          if (!stored) return;
+          lastWrittenJsonByKeyRef.current.set(key, json);
+          onSave?.(valuesToStore);
         } catch (error) {
           console.error(`[FORM-STORAGE] Failed to save data: ${error}`);
         }
@@ -252,8 +263,7 @@ export const useFormStorage = <T extends FieldValues>(
 
         const deserializedValues = transformValues(
           valuesToRestore,
-          // TODO: Fix type casting here
-          serializer as any,
+          serializer,
           true
         );
 
@@ -304,7 +314,7 @@ export const useFormStorage = <T extends FieldValues>(
   useEffect(() => {
     if (!autoSave) return;
 
-    const handleChange = (values: Record<string, any>) =>
+    const handleChange = (values: FieldValues) =>
       saveToStorageRef.current(values, true);
 
     const debouncedHandleChange = debounce
@@ -312,15 +322,23 @@ export const useFormStorage = <T extends FieldValues>(
       : null;
     cancelPendingSaveRef.current = debouncedHandleChange?.cancel ?? null;
 
-    const subscription = watch(debouncedHandleChange ?? handleChange);
+    const listener = debouncedHandleChange ?? handleChange;
+    const unsubscribe = form.subscribe
+      ? form.subscribe({
+          formState: { values: true },
+          callback: ({ values }) => listener(values),
+        })
+      : (form.watch as unknown as WatchWithCallbackBeforeRhf8)(listener)
+          .unsubscribe;
 
     return () => {
-      subscription.unsubscribe();
+      unsubscribe();
       // Saves the last edit now, so an unmount inside the debounce keeps it.
       debouncedHandleChange?.flush();
       cancelPendingSaveRef.current = null;
     };
-  }, [watch, debounce, autoSave]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- form.control identifies the form; RHF v8 recreates watch on every render
+  }, [form.control, debounce, autoSave]);
 
   return {
     isRestored,
