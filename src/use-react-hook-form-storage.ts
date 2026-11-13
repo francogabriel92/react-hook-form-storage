@@ -73,7 +73,7 @@ export const useFormStorage = <T extends FieldValues>(
   const [isRestored, setIsRestored] = useState(false);
   const [isLoading, setIsLoading] = useState(autoRestore);
 
-  const { setValue, watch } = form;
+  const { setValue } = form;
 
   // Read through a ref, not deps: these are passed as inline literals, so
   // depending on them would recreate the callbacks and subscription every render.
@@ -312,15 +312,29 @@ export const useFormStorage = <T extends FieldValues>(
       : null;
     cancelPendingSaveRef.current = debouncedHandleChange?.cancel ?? null;
 
-    const subscription = watch(debouncedHandleChange ?? handleChange);
+    const listener = debouncedHandleChange ?? handleChange;
+    // RHF v8 removed watch(callback). RHF < 7.55 has no subscribe.
+    const unsubscribe = form.subscribe
+      ? form.subscribe({
+          formState: { values: true },
+          callback: ({ values }) => listener(values),
+        })
+      : (
+          form.watch as unknown as (cb: typeof listener) => {
+            unsubscribe: () => void;
+          }
+        )(listener).unsubscribe;
 
     return () => {
-      subscription.unsubscribe();
+      unsubscribe();
       // Saves the last edit now, so an unmount inside the debounce keeps it.
       debouncedHandleChange?.flush();
       cancelPendingSaveRef.current = null;
     };
-  }, [watch, debounce, autoSave]);
+    // Keyed on form.control, not watch: RHF v8 no longer keeps watch stable,
+    // so depending on it would resubscribe and flush the debounce every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.control, debounce, autoSave]);
 
   return {
     isRestored,

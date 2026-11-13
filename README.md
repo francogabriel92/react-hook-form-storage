@@ -42,6 +42,10 @@ This library requires the following peer dependencies:
 - `react >= 16.8.0`
 - `react-hook-form >= 7.0.0`
 
+React Hook Form v8 is supported, including its prereleases.
+With RHF 7.55 or later, autosave uses `form.subscribe`.
+With RHF 7.0 to 7.54, autosave uses the `watch` callback.
+
 ## Quick Start
 
 Here's a basic example of how to use the library:
