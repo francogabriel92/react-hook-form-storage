@@ -37,7 +37,7 @@
     "ssr",
     "nextjs"
   ],
-  "author": "Franco Sánchez <francog.sanchez@hotmail.com>",
+  "author": "Franco Sánchez <hello@fgs-dev.com.ar> (https://fgs-dev.com.ar)",
   "license": "MIT",
   "peerDependencies": {
     "react": ">=16.8.0",
