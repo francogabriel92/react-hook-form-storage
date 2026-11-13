@@ -1,6 +1,6 @@
 import { beforeEach, describe, it, expect, jest } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { useForm } from 'react-hook-form';
+import { FieldValues, useForm } from 'react-hook-form';
 import { UseFormStorageOptions } from '../types';
 import { useFormStorage } from '../use-react-hook-form-storage';
 import { createMockRemoteStore } from './test-utils';
@@ -782,7 +782,7 @@ describe('useFormStorage', () => {
       ({ storageKey, onSave }: { storageKey: string; onSave: jest.Mock }) => {
         const form = useForm({ defaultValues: FORM_DEFAULT_VALUES });
         const formStorage = useFormStorage(storageKey, form, {
-          onSave: onSave as (values: Record<string, any>) => void,
+          onSave: onSave as (values: FieldValues) => void,
         });
         return { form, formStorage };
       },

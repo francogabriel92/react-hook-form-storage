@@ -189,7 +189,7 @@ export const useFormStorage = <T extends FieldValues>(
   const latestAutosaveRef = useRef(new Map<string, number>());
 
   const saveToStorage = useCallback(
-    async (values: Record<string, any>, autosave = false) => {
+    async (values: FieldValues, autosave = false) => {
       const { included, excluded, serializer, onSave } = optionsRef.current;
       const latest = latestAutosaveRef.current;
       const writeId = (latest.get(key) ?? 0) + 1;
@@ -204,7 +204,7 @@ export const useFormStorage = <T extends FieldValues>(
             included,
             excluded
           );
-          const serialized = transformValues(valuesToStore, serializer as any);
+          const serialized = transformValues(valuesToStore, serializer);
           const stored = await storageAdapter.setItem(
             key,
             JSON.stringify(serialized)
@@ -252,8 +252,7 @@ export const useFormStorage = <T extends FieldValues>(
 
         const deserializedValues = transformValues(
           valuesToRestore,
-          // TODO: Fix type casting here
-          serializer as any,
+          serializer,
           true
         );
 
@@ -304,7 +303,7 @@ export const useFormStorage = <T extends FieldValues>(
   useEffect(() => {
     if (!autoSave) return;
 
-    const handleChange = (values: Record<string, any>) =>
+    const handleChange = (values: FieldValues) =>
       saveToStorageRef.current(values, true);
 
     const debouncedHandleChange = debounce

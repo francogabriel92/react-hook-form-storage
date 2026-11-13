@@ -17,7 +17,7 @@
     "test": "jest",
     "test:watch": "jest --watchAll",
     "test:coverage": "jest --coverage",
-    "lint": "eslint 'src/**/*.{ts,tsx}' --max-warnings=17",
+    "lint": "eslint 'src/**/*.{ts,tsx}' --max-warnings=0",
     "lint:fix": "eslint 'src/**/*.{ts,tsx}' --fix",
     "typecheck": "tsc --noEmit"
   },

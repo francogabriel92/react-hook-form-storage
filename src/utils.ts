@@ -1,5 +1,4 @@
 import { FieldValues, Path } from 'react-hook-form';
-import { Serializer } from './types';
 
 /**
  * Filters the fields of an object based on included and excluded field lists.
@@ -45,12 +44,12 @@ export const findNestedPaths = (paths?: string[]): string[] =>
  * @returns A debounced version of the function. `cancel` discards the pending
  * call. `flush` runs the pending call now.
  */
-export const debouncer = <T extends (...args: any[]) => any>(
-  cb: T,
+export const debouncer = <A extends unknown[]>(
+  cb: (...args: A) => void,
   delay: number
 ) => {
   let timeout: ReturnType<typeof setTimeout> | null = null;
-  let pendingArgs: Parameters<T> | null = null;
+  let pendingArgs: A | null = null;
 
   const cancel = () => {
     if (timeout) clearTimeout(timeout);
@@ -64,13 +63,19 @@ export const debouncer = <T extends (...args: any[]) => any>(
     if (args) cb(...args);
   };
 
-  const debounced = (...args: Parameters<T>) => {
+  const debounced = (...args: A) => {
     if (timeout) clearTimeout(timeout);
     pendingArgs = args;
     timeout = setTimeout(flush, delay);
   };
 
   return Object.assign(debounced, { cancel, flush });
+};
+
+// A Serializer for any field: `never` parameters accept every field type.
+type FieldTransforms = {
+  serialize?: (value: never) => unknown;
+  deserialize?: (value: never) => unknown;
 };
 
 /**
@@ -82,16 +87,13 @@ export const debouncer = <T extends (...args: any[]) => any>(
  */
 export const transformValues = <T extends FieldValues>(
   values: T,
-  serializer: Record<string, Serializer<any, any>> = {},
+  serializer: Partial<Record<string, FieldTransforms>> = {},
   deserialize = false
 ): Partial<T> => {
-  const entries = Object.entries(values) as [Path<T>, any][];
-  const serializerRecord = serializer as
-    | Record<string, Serializer<T, any>>
-    | undefined;
+  const entries = Object.entries(values) as [Path<T>, unknown][];
 
   return entries.reduce((acc, [field, value]) => {
-    const fieldSerializer = serializerRecord?.[field];
+    const fieldSerializer = serializer[field];
 
     if (!fieldSerializer) return { ...acc, [field]: value };
 
@@ -104,7 +106,7 @@ export const transformValues = <T extends FieldValues>(
 
     // Contain a throwing transform to its own field.
     try {
-      return { ...acc, [field]: transformFn(value) };
+      return { ...acc, [field]: transformFn(value as never) };
     } catch (error) {
       console.error(
         `[FORM-STORAGE] Failed to ${
